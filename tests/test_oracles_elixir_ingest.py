@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
+import respx
+
+from draftassistant import config
 from draftassistant.db.repositories import champion_repo, oe_repo, synergy_repo
 from draftassistant.ingest import oracles_elixir
 
@@ -131,3 +135,49 @@ def test_alias_map_resolves_wukong_to_monkeyking(test_db_conn):
     )
     resolved = oracles_elixir._resolve_champion_id(test_db_conn, "Wukong")
     assert resolved == 99
+
+
+def test_import_csv_bytes_saves_file_and_imports(test_db_conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "RAW_OE_DIR", tmp_path / "oe")
+    _seed_champions(test_db_conn)
+
+    summary = oracles_elixir.import_csv_bytes(test_db_conn, "uploaded.csv", FIXTURE_CSV.read_bytes())
+
+    assert summary["rows_upserted"] == 20
+    assert (tmp_path / "oe" / "uploaded.csv").exists()
+
+
+def test_fetch_from_url_downloads_and_imports(test_db_conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "RAW_OE_DIR", tmp_path / "oe")
+    _seed_champions(test_db_conn)
+
+    with respx.mock:
+        respx.get("https://example.com/data/2026_LoL_esports_match_data.csv").mock(
+            return_value=httpx.Response(200, content=FIXTURE_CSV.read_bytes())
+        )
+        summary = oracles_elixir.fetch_from_url(
+            test_db_conn, "https://example.com/data/2026_LoL_esports_match_data.csv"
+        )
+
+    assert summary["rows_upserted"] == 20
+    assert (tmp_path / "oe" / "2026_LoL_esports_match_data.csv").exists()
+
+
+def test_fetch_from_url_names_file_from_google_sheets_export_link(test_db_conn, tmp_path, monkeypatch):
+    """A Google Sheets export URL has no useful filename in its path -- must still produce a
+    valid .csv filename rather than crashing or writing an unusable name."""
+    monkeypatch.setattr(config, "RAW_OE_DIR", tmp_path / "oe")
+    _seed_champions(test_db_conn)
+
+    with respx.mock:
+        respx.get("https://docs.google.com/spreadsheets/d/FAKE_ID_123/export").mock(
+            return_value=httpx.Response(200, content=FIXTURE_CSV.read_bytes())
+        )
+        summary = oracles_elixir.fetch_from_url(
+            test_db_conn, "https://docs.google.com/spreadsheets/d/FAKE_ID_123/export?format=csv"
+        )
+
+    assert summary["rows_upserted"] == 20
+    saved_files = list((tmp_path / "oe").iterdir())
+    assert len(saved_files) == 1
+    assert saved_files[0].suffix == ".csv"

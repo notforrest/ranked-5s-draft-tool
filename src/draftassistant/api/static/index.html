@@ -45,6 +45,33 @@
       </div>
     </div>
 
+    <div class="panel">
+      <h2>4. Meta Data <span class="panel-optional">(optional)</span></h2>
+      <p class="panel-hint">Global win/pick rate and pro-match synergy data. Both are best-effort
+        &mdash; suggestions still work without them, using personal data and role fit alone.</p>
+
+      <div class="meta-subsection">
+        <div class="meta-subsection-title">Global tier list</div>
+        <p class="panel-hint panel-hint-small">Auto-fetched from op.gg (unofficial, can break if
+          they change their API).</p>
+        <button id="fetch-tierlist-btn" class="btn btn-secondary btn-small">Fetch Tier List</button>
+        <div id="tierlist-status" class="refresh-status" hidden></div>
+      </div>
+
+      <div class="meta-subsection">
+        <div class="meta-subsection-title">Oracle's Elixir (pro synergy)</div>
+        <p class="panel-hint panel-hint-small">Download the current file from
+          <a href="https://oracleselixir.com/tools/downloads" target="_blank" rel="noopener">oracleselixir.com</a>,
+          then upload it here &mdash; or fetch automatically if a URL is configured in <code>.env</code>.</p>
+        <button id="fetch-oe-btn" class="btn btn-secondary btn-small" hidden>Fetch from Configured URL</button>
+        <label class="btn btn-secondary btn-small file-btn">
+          Upload CSV
+          <input type="file" id="oe-upload-input" accept=".csv" hidden>
+        </label>
+        <div id="oe-status" class="refresh-status" hidden></div>
+      </div>
+    </div>
+
   </div>
 
   <div class="setup-actions">

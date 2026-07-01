@@ -20,6 +20,13 @@ RIOT_API_KEY = os.environ.get("RIOT_API_KEY", "")
 RIOT_ACCOUNT_REGION = os.environ.get("RIOT_ACCOUNT_REGION", "americas")
 RIOT_PLATFORM_REGION = os.environ.get("RIOT_PLATFORM_REGION", "na1")
 
+# Optional: the current Oracle's Elixir CSV/Google-Sheets-export download link, grabbed by hand
+# from https://oracleselixir.com/tools/downloads (the exact link isn't stable long-term, so this
+# is a manually-set-once value, not something the app discovers on its own). When set, the setup
+# screen's "Fetch Oracle's Elixir data" button uses it directly instead of requiring a file
+# upload each time.
+ORACLES_ELIXIR_CSV_URL = os.environ.get("ORACLES_ELIXIR_CSV_URL", "")
+
 # Ranked queues treated as "Ranked 5s-relevant" for personal aggregate stats.
 RANKED_QUEUE_IDS = (420, 440)  # 420 = Solo/Duo, 440 = Flex
 

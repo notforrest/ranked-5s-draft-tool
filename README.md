@@ -55,22 +55,25 @@ anyone.
 
 ## 5. (Optional but recommended) Load meta/synergy data
 
-- **Global tier list**: copy `data/curated/tier_list/EXAMPLE.yaml.template` to e.g.
-  `data/curated/tier_list/14.13.yaml` (drop the `.template` suffix), fill in real numbers from a
-  site like u.gg/op.gg/lolalytics for the champions/roles you care about, then:
-  ```bash
-  python scripts/import_tier_list.py data/curated/tier_list/14.13.yaml
-  ```
-  Riot's API doesn't expose this data directly, so it's only ever as fresh as your last edit --
-  worth re-doing after major patches.
-- **Pro-match synergy data**: download a current CSV from Oracle's Elixir
-  (oracleselixir.com's data page) and run:
-  ```bash
-  python scripts/import_oracles_elixir.py path/to/downloaded.csv
-  ```
+Both of these are optional -- the tool still works without them, just with fewer signals
+feeding suggestions (personal mastery/win-rate and role-fit still apply either way).
 
-Both are optional -- the tool still works without them, just with fewer signals feeding
-suggestions (personal mastery/win-rate and role-fit still apply either way).
+- **Global tier list**: easiest is the **"Fetch Tier List" button on the setup screen's "4. Meta
+  Data" panel** -- automatically pulls current win/pick rate from OP.GG (unofficial, best-effort;
+  see `src/draftassistant/staticdata/opgg_client.py` for why OP.GG specifically and why this can
+  break if they change their API). Same thing from the CLI: `python scripts/fetch_tier_list.py`.
+  If it's ever down/broken, the manual path still works independently: copy
+  `data/curated/tier_list/EXAMPLE.yaml.template` to e.g. `data/curated/tier_list/14.13.yaml`,
+  fill in numbers by hand from any site you like, then `python scripts/import_tier_list.py
+  data/curated/tier_list/14.13.yaml`.
+- **Pro-match synergy data (Oracle's Elixir)**: download the current file from
+  [oracleselixir.com/tools/downloads](https://oracleselixir.com/tools/downloads) yourself (the
+  exact link isn't stable enough to hardcode), then either:
+  - **Upload it** via the "Upload CSV" button on the setup screen's "4. Meta Data" panel, or
+  - **Configure it once** by pasting the link into `.env` as `ORACLES_ELIXIR_CSV_URL=...`, after
+    which the setup screen's "Fetch from Configured URL" button downloads and imports it
+    automatically -- only re-paste the link if it goes stale (roughly once per split).
+  - CLI equivalent: `python scripts/import_oracles_elixir.py path/to/downloaded.csv`.
 
 ## 6. Before each session: refresh personal data
 

@@ -71,7 +71,7 @@ button { font-family: var(--font); cursor: pointer; }
 
 .setup-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
 }
 @media (max-width: 900px) {
@@ -140,6 +140,20 @@ button { font-family: var(--font); cursor: pointer; }
 .refresh-status .continue-anyway {
   display: inline-block;
   margin-top: 8px;
+}
+
+.panel-optional { color: var(--text-dim); font-weight: 400; font-size: 14px; }
+
+.meta-subsection { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.meta-subsection:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.meta-subsection-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.panel-hint-small { font-size: 12px; margin-bottom: 8px; }
+.panel-hint-small a { color: var(--blue); }
+
+.file-btn {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
 }
 
 .side-toggle { display: flex; gap: 10px; }

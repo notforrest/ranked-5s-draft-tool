@@ -11,8 +11,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import httpx
 import pandas as pd
 
+from draftassistant import config
 from draftassistant.db.repositories import champion_repo, oe_repo, synergy_repo
 
 logger = logging.getLogger(__name__)
@@ -124,6 +126,33 @@ def import_csv(conn, csv_path: Path) -> dict:
         "games_count": int(games_count),
         "teams_count": int(teams_count),
     }
+
+
+def import_csv_bytes(conn, filename: str, content: bytes) -> dict:
+    """Saves raw CSV bytes under data/raw/oracles_elixir/ (same location a manually-downloaded
+    file would go) and imports it -- the shared landing point for both the UI upload endpoint
+    and fetch_from_url below, so there's exactly one place that decides where files get saved."""
+    config.ensure_data_dirs()
+    dest = config.RAW_OE_DIR / filename
+    dest.write_bytes(content)
+    return import_csv(conn, dest)
+
+
+def fetch_from_url(conn, url: str) -> dict:
+    """Downloads a CSV from a user-supplied URL and imports it -- for when the user has grabbed
+    the current download link from https://oracleselixir.com/tools/downloads themselves (the
+    exact link isn't stable/hardcodable long-term -- OE has changed hosting mechanisms before --
+    so this deliberately takes the URL as an argument rather than assuming one). Works with a
+    plain HTTP GET for either a direct CSV link or a Google Sheets "export as CSV" link
+    (`.../export?format=csv`), since OE's data is published for exactly this kind of reuse and
+    typically needs no authentication either way.
+    """
+    resp = httpx.get(url, timeout=60.0, follow_redirects=True)
+    resp.raise_for_status()
+    filename = Path(httpx.URL(url).path).name or "oracles_elixir_fetched.csv"
+    if not filename.endswith(".csv"):
+        filename += ".csv"
+    return import_csv_bytes(conn, filename, resp.content)
 
 
 def _to_plain(value):

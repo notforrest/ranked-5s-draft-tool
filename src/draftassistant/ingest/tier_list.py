@@ -1,9 +1,16 @@
-"""Curated global tier-list YAML ingestion.
+"""Global tier-list ingestion -- two paths into the same `global_tier_list` table.
 
-The tier list is a hand-editable file (data/curated/tier_list/<patch>.yaml) the user maintains
-themselves by copying numbers off a third-party site (u.gg/op.gg/lolalytics) -- Riot's API does
-not expose global win/pick/ban rate data, so this is deliberately a manual, low-frequency import,
-not something fetched automatically.
+Riot's own API does not expose global win/pick/ban rate data at all, so this data has to come
+from a third-party tier-list site one way or another:
+
+1. `import_tier_list_file` -- a hand-editable YAML file (data/curated/tier_list/<patch>.yaml)
+   the user maintains themselves by copying numbers off a site of their choice. Always works,
+   any source, but manual.
+2. `import_from_opgg` -- automated, via staticdata/opgg_client.py's unofficial OP.GG API call.
+   No manual copying needed, but it's a best-effort scrape of an undocumented endpoint that can
+   break if OP.GG changes it (see opgg_client.py's docstring for the reasoning behind choosing
+   OP.GG specifically). Rows from either path share the same table and schema; source_note
+   records which one produced a given row.
 """
 from __future__ import annotations
 
@@ -13,8 +20,13 @@ from pathlib import Path
 import yaml
 
 from draftassistant.db.repositories import champion_repo, tierlist_repo
+from draftassistant.staticdata import opgg_client
 
 logger = logging.getLogger(__name__)
+
+_OPGG_POSITION_TO_ROLE = {
+    "TOP": "TOP", "JUNGLE": "JUNGLE", "MID": "MID", "SUPPORT": "SUPPORT", "ADC": "BOTTOM",
+}
 
 
 def import_tier_list_file(conn, yaml_path: Path) -> dict:
@@ -75,4 +87,90 @@ def import_tier_list_file(conn, yaml_path: Path) -> dict:
         "entries_imported": imported,
         "entries_unresolved": len(unresolved),
         "unresolved_champion_names": sorted(set(unresolved)),
+    }
+
+
+def _normalize_patch(version: str | None) -> str | None:
+    """"14.24.1" -> "14.24" (major.minor), matching the convention used elsewhere (see
+    refresh/pre_draft_refresh.py's _derive_patch). Falls back to the raw string unchanged if it
+    doesn't look like a dotted version (OP.GG's own versioning scheme isn't documented)."""
+    if not version:
+        return version
+    parts = version.split(".")
+    if len(parts) < 2:
+        return version
+    return f"{parts[0]}.{parts[1]}"
+
+
+def import_from_opgg(conn, mode: str = "ranked") -> dict:
+    """Fetches global champion win/pick rate from OP.GG's unofficial API (one HTTP request) and
+    upserts it into global_tier_list -- the automated counterpart to import_tier_list_file.
+
+    For each champion, prefer per-position stats when OP.GG's response includes them (more
+    precise win_rate); when it doesn't, fall back to the champion's overall average_stats
+    applied to every role this app already knows the champion is played in (via
+    champion_role_eligibility, populated from personal/pro match data) -- a champion with no
+    known eligible role yet is skipped for this run rather than guessed at.
+
+    pick_rate is always the champion's OVERALL pick rate (average_stats), not position-specific
+    -- OP.GG's per-position figure represents "% of this champion's own games in this position,"
+    which isn't the same statistic as "market share among all picks in this role" and would be
+    misleading to present as if it were. This is a known simplification, documented here rather
+    than silently implied. `tier`/`ban_rate` aren't populated by this path (OP.GG's numeric tier
+    ranking isn't a letter grade and isn't worth guessing a translation for; ban_rate isn't in
+    this endpoint's response at all) -- both remain available via the manual YAML path if wanted.
+    """
+    payload = opgg_client.fetch_champion_stats(mode=mode)
+    patch = _normalize_patch(payload.get("meta", {}).get("version"))
+    source_note = f"Auto-fetched from op.gg (unofficial API), meta.version={payload.get('meta', {}).get('version')}"
+
+    imported = 0
+    skipped_unresolved_champion: list[int] = []
+    skipped_no_role: list[int] = []
+
+    for summary in payload.get("data") or []:
+        champion_id = summary.get("id")
+        if champion_repo.get_champion_by_id(conn, champion_id) is None:
+            skipped_unresolved_champion.append(champion_id)
+            continue
+
+        average_stats = summary.get("average_stats") or {}
+        overall_pick_rate = average_stats.get("pick_rate")
+        positions = summary.get("positions") or []
+
+        if positions:
+            for position in positions:
+                role = _OPGG_POSITION_TO_ROLE.get(position.get("name"))
+                if role is None:
+                    continue
+                stats = position.get("stats") or {}
+                tierlist_repo.upsert_tier_entry(
+                    conn, champion_id=champion_id, role=role, patch=patch,
+                    win_rate=stats.get("win_rate"), pick_rate=overall_pick_rate,
+                    ban_rate=None, tier=None, sample_size=stats.get("play"),
+                    source_note=source_note,
+                )
+                imported += 1
+        else:
+            eligible_roles = champion_repo.get_role_eligibility(conn, champion_id)
+            if not eligible_roles:
+                skipped_no_role.append(champion_id)
+                continue
+            for role in eligible_roles:
+                tierlist_repo.upsert_tier_entry(
+                    conn, champion_id=champion_id, role=role, patch=patch,
+                    win_rate=average_stats.get("win_rate"), pick_rate=overall_pick_rate,
+                    ban_rate=None, tier=None, sample_size=None,
+                    source_note=source_note,
+                )
+                imported += 1
+
+    return {
+        "source": "opgg",
+        "mode": mode,
+        "patch": patch,
+        "champions_processed": len(payload.get("data") or []),
+        "entries_imported": imported,
+        "champions_skipped_unresolved": skipped_unresolved_champion,
+        "champions_skipped_no_known_role": skipped_no_role,
     }

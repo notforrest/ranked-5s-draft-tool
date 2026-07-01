@@ -73,7 +73,17 @@ async function init() {
   }
 
   showSetupView();
-  await Promise.all([loadRoster(), loadChampions(), loadLastRefresh()]);
+  try {
+    await Promise.all([loadRoster(), loadChampions(), loadLastRefresh(), loadOracleElixirStatus()]);
+  } catch (e) {
+    // A single failed fetch (e.g. server not fully up yet) shouldn't leave the page silently
+    // half-broken with no explanation -- surface it and let the user reload.
+    console.error("Failed to load initial setup data:", e);
+    const banner = document.createElement("div");
+    banner.className = "refresh-status error";
+    banner.textContent = `Could not load initial data (${e.message}). Try reloading the page.`;
+    document.querySelector(".setup-header").after(banner);
+  }
 }
 
 function showSetupView() {
@@ -93,6 +103,9 @@ function wireStaticHandlers() {
   document.getElementById("refresh-btn").addEventListener("click", onRefreshClicked);
   document.getElementById("start-draft-btn").addEventListener("click", onStartDraftClicked);
   document.getElementById("new-draft-btn").addEventListener("click", onNewDraftClicked);
+  document.getElementById("fetch-tierlist-btn").addEventListener("click", onFetchTierListClicked);
+  document.getElementById("fetch-oe-btn").addEventListener("click", onFetchOracleElixirClicked);
+  document.getElementById("oe-upload-input").addEventListener("change", onOracleElixirFileSelected);
 
   document.querySelectorAll(".side-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -317,6 +330,92 @@ function appendContinueAnywayLink(container) {
     container.hidden = true;
   });
   container.appendChild(btn);
+}
+
+/* ---------------- Meta data (tier list + Oracle's Elixir) ---------------- */
+
+async function loadOracleElixirStatus() {
+  const btn = document.getElementById("fetch-oe-btn");
+  try {
+    const status = await api("GET", "/api/refresh/oracles-elixir/status");
+    btn.hidden = !status.configured_url_set;
+  } catch (e) {
+    btn.hidden = true;
+  }
+}
+
+async function onFetchTierListClicked() {
+  const btn = document.getElementById("fetch-tierlist-btn");
+  const statusEl = document.getElementById("tierlist-status");
+
+  btn.disabled = true;
+  statusEl.hidden = false;
+  statusEl.className = "refresh-status loading";
+  statusEl.textContent = "Fetching from op.gg…";
+
+  try {
+    const summary = await api("POST", "/api/refresh/tier-list", { mode: "ranked" });
+    statusEl.className = "refresh-status success";
+    statusEl.textContent = `Imported ${summary.entries_imported} role-entries `
+      + `(patch ${summary.patch}, ${summary.champions_processed} champions seen).`;
+  } catch (e) {
+    statusEl.className = "refresh-status error";
+    statusEl.textContent = `Fetch failed: ${e.message}. The manual tier_list.yaml path still `
+      + `works independently -- see the README.`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function onFetchOracleElixirClicked() {
+  const btn = document.getElementById("fetch-oe-btn");
+  const statusEl = document.getElementById("oe-status");
+
+  btn.disabled = true;
+  statusEl.hidden = false;
+  statusEl.className = "refresh-status loading";
+  statusEl.textContent = "Downloading from the configured URL…";
+
+  try {
+    const summary = await api("POST", "/api/refresh/oracles-elixir/fetch");
+    renderOracleElixirOutcome(statusEl, summary);
+  } catch (e) {
+    statusEl.className = "refresh-status error";
+    statusEl.textContent = `Fetch failed: ${e.message}. Try the Upload option instead, or `
+      + `re-check the URL in .env against oracleselixir.com/tools/downloads.`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function onOracleElixirFileSelected(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("oe-status");
+
+  statusEl.hidden = false;
+  statusEl.className = "refresh-status loading";
+  statusEl.textContent = `Importing ${file.name}…`;
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/refresh/oracles-elixir/upload", { method: "POST", body: formData });
+    const summary = await res.json();
+    if (!res.ok) throw new Error(summary.detail || "Upload failed");
+    renderOracleElixirOutcome(statusEl, summary);
+  } catch (err) {
+    statusEl.className = "refresh-status error";
+    statusEl.textContent = `Import failed: ${err.message}`;
+  } finally {
+    e.target.value = "";
+  }
+}
+
+function renderOracleElixirOutcome(statusEl, summary) {
+  statusEl.className = "refresh-status success";
+  statusEl.textContent = `Imported ${summary.rows_upserted} rows across ${summary.games_count} `
+    + `games. ${summary.rows_unresolved} champion name(s) unresolved.`;
 }
 
 async function onStartDraftClicked() {
