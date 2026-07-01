@@ -269,3 +269,58 @@ def test_second_player_auth_error_does_not_stop_run(test_db_conn, tmp_path, monk
 
     bob_state = match_repo.get_refresh_state(test_db_conn, player2_id)
     assert bob_state["last_refresh_status"] == "error"
+
+
+def test_unexpected_error_on_one_player_does_not_abort_the_batch(test_db_conn, tmp_path, monkeypatch):
+    """A non-Riot-specific failure for one player (e.g. a malformed API response, or -- the
+    motivating real case -- a stale duplicate row causing a puuid UNIQUE-constraint violation)
+    must not crash the whole run: it should be isolated and reported like the Riot-specific
+    error cases, with every other player still refreshed normally."""
+    monkeypatch.setattr(config, "RAW_MATCHES_DIR", tmp_path / "matches")
+    monkeypatch.setattr(config, "RIOT_API_KEY", "RGAPI-fake")
+
+    player1_id = _seed_player(test_db_conn, display_name="Alice", riot_game_name="Alice", riot_tag_line="NA1")
+    player2_id = _seed_player(test_db_conn, display_name="Bob", riot_game_name="Bob", riot_tag_line="NA1")
+    _seed_champion(test_db_conn, champion_id=1, name="Ahri")
+    _seed_champion(test_db_conn, champion_id=2, name="LeeSin")
+    test_db_conn.commit()
+
+    with respx.mock:
+        _mock_account_endpoint(game_name="Alice", tag_line="NA1", puuid="alice-puuid")
+        respx.get(
+            "https://na1.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/alice-puuid"
+        ).mock(return_value=httpx.Response(200, json=[]))
+        respx.get(
+            url__regex=r"https://americas\.api\.riotgames\.com/lol/match/v5/matches/by-puuid/alice-puuid/ids.*"
+        ).mock(return_value=httpx.Response(200, json=[]))
+
+        # Bob's account resolves fine, but his mastery endpoint returns a malformed body (null
+        # instead of a list) -- this raises a plain TypeError deep inside mastery_repo, not one
+        # of the Riot-specific exception types the earlier except-clauses know about.
+        _mock_account_endpoint(game_name="Bob", tag_line="NA1", puuid="bob-puuid")
+        respx.get(
+            "https://na1.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/bob-puuid"
+        ).mock(return_value=httpx.Response(200, json=None))
+
+        summary = pre_draft_refresh.run(test_db_conn)
+
+    assert summary["status"] == "partial"
+    assert summary["fatal_auth_error"] is None
+    assert len(summary["players"]) == 2
+    assert summary["players"][0]["status"] == "ok"
+    assert summary["players"][1]["status"] == "error"
+    assert "Unexpected error" in summary["players"][1]["error"]
+
+    # Alice was refreshed normally despite Bob's failure.
+    alice_row = roster_repo.get_player(test_db_conn, player1_id)
+    assert alice_row["puuid"] == "alice-puuid"
+
+    # Bob's puuid WAS resolved before the mastery call blew up (resolution happens first) and
+    # his failure is recorded, but he didn't take Alice down with him.
+    bob_row = roster_repo.get_player(test_db_conn, player2_id)
+    assert bob_row["puuid"] == "bob-puuid"
+    bob_state = match_repo.get_refresh_state(test_db_conn, player2_id)
+    assert bob_state["last_refresh_status"] == "error"
+
+    latest_run = match_repo.get_latest_refresh_run(test_db_conn)
+    assert latest_run["status"] == "partial"

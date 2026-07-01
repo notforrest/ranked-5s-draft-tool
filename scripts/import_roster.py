@@ -37,6 +37,10 @@ def main() -> None:
         conn.close()
 
     print(f"{yaml_path.name}: imported {summary['entries_imported']}/{summary['entries_processed']} players")
+    if summary["renamed"]:
+        print(f"  Detected {len(summary['renamed'])} Riot ID change(s) (updated in place, not duplicated):")
+        for line in summary["renamed"]:
+            print(f"    {line}")
     if summary["entries_skipped"]:
         print(f"  WARNING: {summary['entries_skipped']} entries skipped: {summary['skipped_entries']}")
 

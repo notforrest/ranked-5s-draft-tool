@@ -7,8 +7,10 @@
 #   python scripts/import_roster.py data/curated/roster.yaml
 #
 # Re-run that command any time you edit the file -- adding a friend, fixing a typo'd Riot ID,
-# or changing someone's preferred role. It's an upsert: existing players are updated in place
-# (matched by Riot ID), nothing is ever deleted by re-importing.
+# or changing someone's preferred role. It's an upsert, matched by Riot ID normally -- but if
+# you correct an EXISTING friend's riot_game_name/tag_line (keeping display_name the same), the
+# import recognizes it as a rename and updates that same player in place rather than creating a
+# duplicate. Nothing is ever deleted by re-importing.
 
 players:
   - display_name: "Forrest"        # friendly name shown in the UI

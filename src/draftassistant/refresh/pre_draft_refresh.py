@@ -72,6 +72,23 @@ def run(conn) -> dict:
                 status="partial", error_message=msg,
             )
             continue
+        except Exception as e:
+            # Anything else unexpected (a bad DB row, an integrity error, a malformed API
+            # response) shouldn't take down the whole batch -- one player's problem is isolated
+            # and clearly reported, same as the Riot-specific error cases above, while everyone
+            # else still gets refreshed. Logged with a full traceback for debugging.
+            msg = f"Unexpected error: {e}"
+            logger.exception("Unexpected error refreshing %s (player_id=%s)",
+                              player["display_name"], player["player_id"])
+            player_summaries.append({
+                "player_id": player["player_id"], "display_name": player["display_name"],
+                "status": "error", "error": msg,
+            })
+            match_repo.upsert_refresh_state(
+                conn, player["player_id"], last_match_fetched_ms=None,
+                status="error", error_message=msg,
+            )
+            continue
 
     # Feed newly-fetched matches into derived stats immediately, even if the run ended early --
     # whatever we did fetch should still be reflected.

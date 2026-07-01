@@ -35,6 +35,25 @@ def set_puuid(conn: sqlite3.Connection, player_id: int, puuid: str) -> None:
                  (puuid, player_id))
 
 
+def update_riot_id(conn: sqlite3.Connection, player_id: int, *, riot_game_name: str,
+                    riot_tag_line: str, platform_region: str, account_region: str,
+                    preferred_roles: list[str]) -> None:
+    """Updates an existing player's Riot ID (and dependent region/role fields) in place --
+    used when roster import detects this is the same person under a corrected/renamed Riot ID,
+    rather than a new player. Clears the cached puuid: it was resolved for the OLD Riot ID, and
+    leaving it in place would keep silently pulling mastery/match data for the wrong (or a
+    no-longer-existing) account on the next refresh."""
+    conn.execute(
+        """
+        UPDATE players SET riot_game_name = ?, riot_tag_line = ?, platform_region = ?,
+               account_region = ?, preferred_roles = ?, puuid = NULL, updated_at = datetime('now')
+        WHERE player_id = ?
+        """,
+        (riot_game_name, riot_tag_line, platform_region, account_region,
+         json.dumps(preferred_roles), player_id),
+    )
+
+
 def get_active_players(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute("SELECT * FROM players WHERE is_active = 1 ORDER BY display_name").fetchall()
     return [_row_to_player(r) for r in rows]
