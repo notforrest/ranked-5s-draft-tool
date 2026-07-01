@@ -94,17 +94,66 @@ def _best_matching_role(conn: sqlite3.Connection, champion_id: int, candidate_ro
     return best_role
 
 
-def unfilled_roles(state: DraftState, conn: sqlite3.Connection) -> list[str]:
-    """Roles from `state.roster` (our 5 pre-assigned roster roles) that no pick-so-far has been
-    best-matched to yet. Best-effort matching, not a strict declared role -- a pick doesn't
-    literally announce "I am jungle," so we look up each picked champion's role-eligibility
-    rows and take the eligible role with the most games_observed that is ALSO one of our
-    still-tracked roster roles."""
+def resolve_pick_roles(state: DraftState, conn: sqlite3.Connection) -> dict[int, str | None]:
+    """{slot: role_or_None} for every FILLED pick slot on OUR side. A slot that hasn't been
+    picked yet is simply absent from the dict -- distinct from a filled pick that resolved to
+    None ("no matching role found"), which is the state the manual role-override UI targets.
+
+    Two-pass resolution so a manual override (draft/state.py's DraftEntry.role_override) always
+    wins, is never recomputed, and never gets silently bumped by another pick's own resolution:
+
+      Pass 1 (overrides): every filled our-side pick slot with a role_override set resolves to
+        that value UNCONDITIONALLY, and that role is removed from the pool available to
+        auto-resolution -- regardless of slot order, regardless of whether another pick would
+        have "more naturally" claimed it. Two overrides naming the SAME role is allowed, not
+        rejected here (a duplicate-role roster is a valid real outcome the human may know about
+        even if the tool's own data doesn't reflect it; enforcing uniqueness would require this
+        single-slot-scoped resolution to reach across every other slot, which belongs in
+        DraftState.set_role_override if ever wanted, not here).
+      Pass 2 (auto-resolve the rest): every filled our-side pick WITHOUT an override resolves via
+        the existing greedy best-match algorithm, walked in slot order, against whatever roles
+        pass 1 didn't already remove. An auto-resolved pick can never reclaim a role an override
+        has claimed, because pass 1 always fully completes before pass 2 examines its first
+        candidate -- this is what makes "a later auto-assigned pick correctly sees an earlier
+        override as unavailable" (and vice versa) true unconditionally, not just when the
+        override happens to come first in slot order.
+    """
+    resolved: dict[int, str | None] = {}
+    overridden_slots: set[int] = set()
     remaining_roles = {assignment.role for assignment in state.roster}
-    for champion_id in our_picks_so_far(state):
-        matched_role = _best_matching_role(conn, champion_id, remaining_roles)
+
+    for slot_def in DRAFT_SEQUENCE:  # Pass 1: overrides
+        if slot_def.action != PICK or slot_def.side != state.our_side:
+            continue
+        entry = state.entries[slot_def.slot]
+        if entry is None or entry.role_override is None:
+            continue
+        resolved[slot_def.slot] = entry.role_override
+        overridden_slots.add(slot_def.slot)
+        remaining_roles.discard(entry.role_override)
+
+    for slot_def in DRAFT_SEQUENCE:  # Pass 2: auto-resolve everything else
+        if slot_def.action != PICK or slot_def.side != state.our_side:
+            continue
+        if slot_def.slot in overridden_slots:
+            continue
+        entry = state.entries[slot_def.slot]
+        if entry is None:
+            continue
+        matched_role = _best_matching_role(conn, entry.champion_id, remaining_roles)
+        resolved[slot_def.slot] = matched_role
         if matched_role is not None:
             remaining_roles.discard(matched_role)
+
+    return resolved
+
+
+def unfilled_roles(state: DraftState, conn: sqlite3.Connection) -> list[str]:
+    """Roles from `state.roster` (our 5 pre-assigned roster roles) that no pick-so-far has
+    claimed yet (via auto-resolution or a manual override) -- thin wrapper around
+    `resolve_pick_roles`, so there is exactly one place the actual claiming logic lives."""
+    claimed = {role for role in resolve_pick_roles(state, conn).values() if role is not None}
+    remaining_roles = {assignment.role for assignment in state.roster} - claimed
     # Preserve a stable, deterministic ordering (roster order of first occurrence).
     seen: list[str] = []
     for assignment in state.roster:

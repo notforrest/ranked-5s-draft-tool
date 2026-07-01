@@ -206,6 +206,85 @@ def test_amend_resets_invalidated_flag_on_the_amended_slot_itself():
 
 
 # ------------------------------------------------------------------
+# set_role_override() / clear_role_override()
+# ------------------------------------------------------------------
+# BLUE's real PICK slots (per DRAFT_SEQUENCE) are 6, 9, 10, 17, 18; RED's are 7, 8, 11, 16, 19;
+# BAN slots are 0-5 and 12-15. Unlike enter()/amend(), these two methods DO care about a slot's
+# real action/side, so (unlike the tests above) real slot numbers matter here.
+
+
+def _state_with_blue_pick_at_6() -> DraftState:
+    state = make_state("BLUE")
+    for slot in range(6):
+        state.enter(slot, champion_id=100 + slot)
+    state.enter(6, champion_id=1)  # BLUE's first real pick
+    return state
+
+
+def test_set_role_override_valid():
+    state = _state_with_blue_pick_at_6()
+    state.set_role_override(6, "JUNGLE")
+    assert state.entries[6].role_override == "JUNGLE"
+
+
+def test_clear_role_override_valid():
+    state = _state_with_blue_pick_at_6()
+    state.set_role_override(6, "JUNGLE")
+    state.clear_role_override(6)
+    assert state.entries[6].role_override is None
+
+
+def test_clear_role_override_on_unset_override_is_a_noop():
+    state = _state_with_blue_pick_at_6()
+    state.clear_role_override(6)  # never set -- must not raise
+    assert state.entries[6].role_override is None
+
+
+def test_set_role_override_slot_out_of_range_raises():
+    state = _state_with_blue_pick_at_6()
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(20, "JUNGLE")
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(-1, "JUNGLE")
+
+
+def test_set_role_override_unfilled_slot_raises():
+    state = _state_with_blue_pick_at_6()
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(9, "JUNGLE")  # BLUE's next pick slot, not entered yet
+
+
+def test_set_role_override_on_ban_slot_raises():
+    state = _state_with_blue_pick_at_6()
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(0, "JUNGLE")  # slot 0 is a BAN, not a PICK
+    assert state.entries[0].role_override is None
+
+
+def test_set_role_override_on_opponents_pick_raises():
+    state = make_state("BLUE")
+    for slot in range(8):
+        state.enter(slot, champion_id=100 + slot)  # reaches slot 7, RED's pick
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(7, "JUNGLE")  # RED's pick -- we don't drive their roster
+
+
+def test_set_role_override_invalid_role_name_raises():
+    state = _state_with_blue_pick_at_6()
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(6, "MIDDLE")  # not a valid role string (should be "MID")
+    assert state.entries[6].role_override is None
+
+
+def test_set_role_override_does_not_mutate_state_on_failure():
+    state = _state_with_blue_pick_at_6()
+    snapshot_before = state.to_dict()
+    with pytest.raises(DraftValidationError):
+        state.set_role_override(6, "NOT_A_ROLE")
+    assert state.to_dict() == snapshot_before
+
+
+# ------------------------------------------------------------------
 # to_dict / from_dict round-trip
 # ------------------------------------------------------------------
 

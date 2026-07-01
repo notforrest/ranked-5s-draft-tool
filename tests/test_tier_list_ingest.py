@@ -89,6 +89,46 @@ def test_import_from_opgg_precise_and_fallback_paths(test_db_conn):
     # Vayne (67) has no row at all -- correctly skipped, not guessed at.
     assert tierlist_repo.get_tier_entry(test_db_conn, 67, "TOP", "14.24") is None
 
+    # Ahri's positions data should ALSO have populated champion_role_eligibility (source "opgg")
+    # -- this is what lets a champion picked in a live draft be recognized as "filling" MID even
+    # if no Oracle's Elixir/personal-match data has ever been ingested.
+    ahri_eligibility = champion_repo.get_role_eligibility(test_db_conn, 103)
+    assert ahri_eligibility["MID"] == {"source": "opgg", "games_observed": 10000}
+
+    # Zed's eligibility is untouched by this run (his row came from the "pro" source, seeded
+    # above, via the no-positions fallback path, which doesn't write eligibility at all).
+    zed_eligibility = champion_repo.get_role_eligibility(test_db_conn, 238)
+    assert zed_eligibility["MID"] == {"source": "pro", "games_observed": 500}
+
+
+def test_import_from_opgg_wipes_stale_opgg_eligibility_on_rerun(test_db_conn):
+    """replace_role_eligibility's contract is a wholesale replace per source -- a second run
+    whose payload no longer includes positions data for a champion must remove that champion's
+    stale "opgg" eligibility row, not leave it stuck forever."""
+    _seed_champion(test_db_conn, 103, "Ahri")
+    test_db_conn.commit()
+
+    with respx.mock:
+        respx.get("https://lol-api-champion.op.gg/api/global/champions/ranked").mock(
+            return_value=httpx.Response(200, json=_opgg_payload())
+        )
+        tier_list.import_from_opgg(test_db_conn)
+    assert "MID" in champion_repo.get_role_eligibility(test_db_conn, 103)
+
+    stale_payload = {
+        "meta": {"version": "14.24.2", "match_count": 1},
+        "data": [
+            {"id": 103, "average_stats": {"win_rate": 0.5, "pick_rate": 0.08}, "roles": [], "positions": []},
+        ],
+    }
+    with respx.mock:
+        respx.get("https://lol-api-champion.op.gg/api/global/champions/ranked").mock(
+            return_value=httpx.Response(200, json=stale_payload)
+        )
+        tier_list.import_from_opgg(test_db_conn)
+
+    assert champion_repo.get_role_eligibility(test_db_conn, 103) == {}
+
 
 def test_import_from_opgg_is_reachable_only_from_the_setup_side(test_db_conn):
     """Documentation-as-test: the automated fetch must never be importable from the live-draft

@@ -119,6 +119,19 @@ def import_from_opgg(conn, mode: str = "ranked") -> dict:
     than silently implied. `tier`/`ban_rate` aren't populated by this path (OP.GG's numeric tier
     ranking isn't a letter grade and isn't worth guessing a translation for; ban_rate isn't in
     this endpoint's response at all) -- both remain available via the manual YAML path if wanted.
+
+    Also populates champion_role_eligibility (source "opgg") from positions[].stats.play when
+    positions data is present -- without this, a champion picked in a live draft with NO other
+    role-data source (no Oracle's Elixir import, no personal Riot refresh run yet) would never
+    have its role recognized as "filled", and role-gated suggestions would keep offering that
+    role indefinitely. Uses `play` (games in that position), not `win`, since games_observed is
+    a tie-break magnitude elsewhere (champion_repo.get_role_eligibility/_best_matching_role),
+    never a rate -- matching how `sample_size=stats.get("play")` is already used two lines below
+    for the tier-list row itself. The no-positions fallback branch is NOT extended to write a
+    synthetic eligibility row: it only ever runs for a champion that already has an eligibility
+    row from another source (it skips entirely when none exists), so there's no independently
+    role-scoped signal in that branch to derive one from -- the manual role-override feature
+    (draft/state.py's set_role_override) is the intended fallback for those champions instead.
     """
     payload = opgg_client.fetch_champion_stats(mode=mode)
     patch = _normalize_patch(payload.get("meta", {}).get("version"))
@@ -127,6 +140,7 @@ def import_from_opgg(conn, mode: str = "ranked") -> dict:
     imported = 0
     skipped_unresolved_champion: list[int] = []
     skipped_no_role: list[int] = []
+    opgg_eligibility_rows: list[tuple[int, str, int]] = []
 
     for summary in payload.get("data") or []:
         champion_id = summary.get("id")
@@ -151,6 +165,9 @@ def import_from_opgg(conn, mode: str = "ranked") -> dict:
                     source_note=source_note,
                 )
                 imported += 1
+                play = stats.get("play")
+                if play:
+                    opgg_eligibility_rows.append((champion_id, role, play))
         else:
             eligible_roles = champion_repo.get_role_eligibility(conn, champion_id)
             if not eligible_roles:
@@ -164,6 +181,11 @@ def import_from_opgg(conn, mode: str = "ranked") -> dict:
                     source_note=source_note,
                 )
                 imported += 1
+
+    # Always called, even with an empty list -- a run that (this time) sees zero
+    # positions-bearing champions correctly wipes any stale "opgg" rows from a previous run,
+    # consistent with replace_role_eligibility's documented "wholesale replace per source" contract.
+    champion_repo.replace_role_eligibility(conn, "opgg", opgg_eligibility_rows)
 
     return {
         "source": "opgg",

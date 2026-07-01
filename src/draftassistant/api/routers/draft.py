@@ -20,7 +20,7 @@ from draftassistant.db.repositories import draft_session_repo, roster_repo, tier
 from draftassistant.draft import queries
 from draftassistant.draft.sequence import DRAFT_SEQUENCE
 from draftassistant.draft.state import DraftState, DraftValidationError, RosterAssignment
-from draftassistant.scoring import ban_score, pick_score
+from draftassistant.scoring import ban_score, champion_detail, pick_score
 
 router = APIRouter(tags=["draft"])
 
@@ -68,11 +68,16 @@ def _save_state(conn: sqlite3.Connection, draft_session_id: int, state: DraftSta
     )
 
 
-def _serialize_entries(state: DraftState) -> list[dict | None]:
+def _serialize_entries(state: DraftState, conn: sqlite3.Connection) -> list[dict | None]:
     """Zips `state.entries` with the static per-slot side/action/wiki_step metadata from
     `sequence.DRAFT_SEQUENCE` so the frontend can render the two-column draft board without
     duplicating that table in JS -- each non-null element carries both the live entry data
-    and its fixed slot metadata."""
+    and its fixed slot metadata. Also attaches each our-side pick's resolved role (auto-computed
+    or manually overridden, see queries.resolve_pick_roles) directly onto the entry, so the
+    board's existing per-cell rendering loop can show a role badge with no separate lookup by
+    slot number. Non-pick slots and the opponent's picks always carry `resolved_role: None`,
+    since resolve_pick_roles only ever populates keys for our-side filled pick slots."""
+    resolved_roles = queries.resolve_pick_roles(state, conn)
     out: list[dict | None] = []
     for slot_def, entry in zip(DRAFT_SEQUENCE, state.entries):
         base = {
@@ -82,7 +87,8 @@ def _serialize_entries(state: DraftState) -> list[dict | None]:
             "action": slot_def.action,
         }
         if entry is None:
-            out.append({**base, "champion_id": None, "invalidated": False, "amended_count": 0})
+            out.append({**base, "champion_id": None, "invalidated": False, "amended_count": 0,
+                        "resolved_role": None, "is_role_override": False})
         else:
             out.append(
                 {
@@ -91,6 +97,8 @@ def _serialize_entries(state: DraftState) -> list[dict | None]:
                     "entered_at": entry.entered_at,
                     "amended_count": entry.amended_count,
                     "invalidated": entry.invalidated,
+                    "resolved_role": resolved_roles.get(slot_def.slot),
+                    "is_role_override": entry.role_override is not None,
                 }
             )
     return out
@@ -118,7 +126,7 @@ def _state_payload(conn: sqlite3.Connection, draft_session_id: int, state: Draft
         "draft_session_id": draft_session_id,
         "our_side": state.our_side,
         "current_slot": state.current_slot,
-        "entries": _serialize_entries(state),
+        "entries": _serialize_entries(state, conn),
         "current_slot_info": queries.current_slot_info(state),
     }
     if include_suggestions:
@@ -224,3 +232,56 @@ def get_suggestions(draft_session_id: int, conn: sqlite3.Connection = Depends(ge
     result = _get_suggestions(conn, state)
     result["current_slot_info"] = queries.current_slot_info(state)
     return result
+
+
+# ---------------------------------------------------------------------------
+# POST /api/draft/{draft_session_id}/role-override
+# DELETE /api/draft/{draft_session_id}/role-override/{slot}
+# ---------------------------------------------------------------------------
+class SetRoleOverrideRequest(BaseModel):
+    slot: int
+    role: str
+
+
+@router.post("/draft/{draft_session_id}/role-override")
+def set_role_override(draft_session_id: int, body: SetRoleOverrideRequest,
+                       conn: sqlite3.Connection = Depends(get_db)) -> dict:
+    state = _load_state(conn, draft_session_id)
+    try:
+        state.set_role_override(body.slot, body.role)
+    except DraftValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _save_state(conn, draft_session_id, state)
+    return _state_payload(conn, draft_session_id, state)
+
+
+@router.delete("/draft/{draft_session_id}/role-override/{slot}")
+def clear_role_override(draft_session_id: int, slot: int,
+                         conn: sqlite3.Connection = Depends(get_db)) -> dict:
+    state = _load_state(conn, draft_session_id)
+    try:
+        state.clear_role_override(slot)
+    except DraftValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _save_state(conn, draft_session_id, state)
+    return _state_payload(conn, draft_session_id, state)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/draft/{draft_session_id}/champion-detail/{champion_id}
+# ---------------------------------------------------------------------------
+@router.get("/draft/{draft_session_id}/champion-detail/{champion_id}")
+def get_champion_detail(draft_session_id: int, champion_id: int, role: str | None = None,
+                         conn: sqlite3.Connection = Depends(get_db)) -> dict:
+    """Rich, human-readable detail for one champion against the current draft state -- feeds
+    the hover-detail panel. `role` is an optional override for future use (not currently sent
+    by the frontend, which relies on server-side inference matching whatever the currently
+    rendered suggestion row already implies)."""
+    state = _load_state(conn, draft_session_id)
+    # Display-name lookup only; intentionally all active players, not scoped to this session's
+    # lineup specifically -- harmless since we only ever index into it by state.roster's own
+    # player_ids, which are always a subset.
+    roster_lookup = {p["player_id"]: p for p in roster_repo.get_active_players(conn)}
+    return champion_detail.get_champion_detail(conn, state, champion_id, roster_lookup, requested_role=role)

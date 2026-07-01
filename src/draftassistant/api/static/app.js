@@ -47,6 +47,22 @@ const state = {
 };
 
 /* ============================================================
+   Champion detail hover panel -- controller state
+   ============================================================ */
+const CHAMPION_DETAIL_HOVER_DELAY_MS = 350;  // long enough that a fast mouse pass across many
+                                               // suggestion rows fires zero fetches
+const CHAMPION_DETAIL_CLOSE_GRACE_MS = 150;   // lets the mouse travel row -> panel without a flicker-close
+
+const hoverController = {
+  openTimer: null,         // pending "should I open" timer
+  closeTimer: null,        // pending "should I close" grace-period timer
+  requestToken: 0,         // incremented on every new hover/close; a fetch whose token no
+                            // longer matches when it resolves is discarded (stale response
+                            // from a previously-hovered row must never overwrite the panel)
+  cache: new Map(),        // "sessionId:championId:slot" -> detail response object
+};
+
+/* ============================================================
    Bootstrapping
    ============================================================ */
 document.addEventListener("DOMContentLoaded", init);
@@ -122,6 +138,12 @@ function wireStaticHandlers() {
     renderAmendGrid(e.target.value);
   });
   document.getElementById("amend-popover-close").addEventListener("click", closeAmendPopover);
+
+  // Hovering INTO the detail panel itself (e.g. to read a long section) must not immediately
+  // flicker-close it -- same close-grace-period mechanism as leaving a suggestion row.
+  const detailPanel = document.getElementById("champion-detail-panel");
+  detailPanel.addEventListener("mouseenter", () => clearTimeout(hoverController.closeTimer));
+  detailPanel.addEventListener("mouseleave", onSuggestionRowMouseLeave);
 }
 
 async function loadRoster() {
@@ -480,12 +502,17 @@ function onNewDraftClicked() {
   state.draftSessionId = null;
   state.draft = null;
   state.selectedRoles = new Map();
+  hoverController.cache.clear();
   showSetupView();
   loadRoster();
   loadLastRefresh();
 }
 
 function renderDraft() {
+  // A full state replace can destroy the DOM node the detail panel is anchored to (e.g. the
+  // hovered champion just got picked/banned and is no longer in the suggestions list) --
+  // always close it here rather than risk a panel left pointing at nothing.
+  closeChampionDetailPanel();
   renderStepBanner();
   renderInvalidatedBanner();
   renderBoard();
@@ -597,13 +624,58 @@ function renderBoardRow(containerId, slotEntries, currentSlot) {
       nameTag.className = "slot-champ-name";
       nameTag.textContent = champName(entry.champion_id);
       cell.appendChild(nameTag);
-      cell.addEventListener("click", (evt) => openAmendPopover(entry.slot, evt.currentTarget));
+      cell.addEventListener("click", (evt) => {
+        // The role-badge select handles its own clicks; don't also open the amend popover
+        // when the click originated there.
+        if (evt.target.closest(".role-badge-select")) return;
+        openAmendPopover(entry.slot, evt.currentTarget);
+      });
+      if (entry.action === "PICK" && state.draft.our_side && entry.side === state.draft.our_side) {
+        cell.appendChild(buildRoleBadge(entry));
+      }
     } else {
       cell.classList.add("empty");
     }
     if (entry.slot === currentSlot) cell.classList.add("current-slot");
     if (entry.invalidated) cell.classList.add("invalidated");
     el.appendChild(cell);
+  }
+}
+
+function buildRoleBadge(entry) {
+  const select = document.createElement("select");
+  select.className = "role-badge-select";
+  select.classList.add(entry.resolved_role ? (entry.is_role_override ? "role-badge-override" : "role-badge-set") : "role-badge-unknown");
+  select.title = entry.is_role_override ? "Manually set -- click to change or clear" : "Auto-detected role -- click to override";
+
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "Unknown";
+  select.appendChild(blank);
+  for (const role of VALID_ROLES) {
+    const opt = document.createElement("option");
+    opt.value = role;
+    opt.textContent = role;
+    select.appendChild(opt);
+  }
+  select.value = entry.resolved_role || "";
+
+  select.addEventListener("click", (evt) => evt.stopPropagation());
+  select.addEventListener("change", () => onRoleBadgeChanged(entry.slot, select.value));
+
+  return select;
+}
+
+async function onRoleBadgeChanged(slot, role) {
+  try {
+    const result = role
+      ? await api("POST", `/api/draft/${state.draftSessionId}/role-override`, { slot, role })
+      : await api("DELETE", `/api/draft/${state.draftSessionId}/role-override/${slot}`);
+    state.draft = result;
+    renderDraft();
+  } catch (e) {
+    console.error("Could not update role override:", e);
+    renderBoard(); // revert the select's stale optimistic value back to the last-known-good state
   }
 }
 
@@ -799,6 +871,8 @@ function buildSuggestionRow(suggestion) {
   row.appendChild(main);
 
   row.addEventListener("click", () => onChampionClicked(suggestion.champion_id));
+  row.addEventListener("mouseenter", () => onSuggestionRowMouseEnter(suggestion, row));
+  row.addEventListener("mouseleave", onSuggestionRowMouseLeave);
 
   return row;
 }
@@ -830,6 +904,246 @@ function buildWhyText(suggestion) {
 function formatPercent(value) {
   if (value === null || value === undefined) return "--";
   return `${Math.round(value * 100)}%`;
+}
+
+function formatRealPercent(value) {
+  if (value === null || value === undefined) return "--";
+  // One decimal place -- distinguishes this from formatPercent() (used for normalized 0-100
+  // SCORES, rounded to whole numbers); real win rates like "53.2%" carry meaningful precision
+  // a driver comparing two close options during a live draft would want.
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+/* ============================================================
+   Champion detail hover panel
+   ============================================================ */
+function cacheKey(draftSessionId, championId, currentSlot) {
+  return `${draftSessionId}:${championId}:${currentSlot}`;
+}
+
+function onSuggestionRowMouseEnter(suggestion, rowEl) {
+  clearTimeout(hoverController.closeTimer);
+  clearTimeout(hoverController.openTimer);
+  hoverController.openTimer = setTimeout(() => {
+    openChampionDetailPanel(suggestion.champion_id, rowEl);
+  }, CHAMPION_DETAIL_HOVER_DELAY_MS);
+}
+
+function onSuggestionRowMouseLeave() {
+  clearTimeout(hoverController.openTimer);
+  hoverController.closeTimer = setTimeout(closeChampionDetailPanel, CHAMPION_DETAIL_CLOSE_GRACE_MS);
+}
+
+async function openChampionDetailPanel(championId, anchorEl) {
+  const myToken = ++hoverController.requestToken;
+
+  const panel = document.getElementById("champion-detail-panel");
+  positionChampionDetailPanel(anchorEl);
+  panel.hidden = false;
+
+  const key = cacheKey(state.draftSessionId, championId, state.draft.current_slot);
+  if (hoverController.cache.has(key)) {
+    renderChampionDetailPanel(hoverController.cache.get(key));
+    return;
+  }
+
+  renderChampionDetailPanelLoading(championId);
+  try {
+    const detail = await api("GET", `/api/draft/${state.draftSessionId}/champion-detail/${championId}`);
+    if (myToken !== hoverController.requestToken) return; // superseded by a later hover; discard
+    hoverController.cache.set(key, detail);
+    renderChampionDetailPanel(detail);
+  } catch (e) {
+    if (myToken !== hoverController.requestToken) return;
+    renderChampionDetailPanelError(e);
+  }
+}
+
+function closeChampionDetailPanel() {
+  document.getElementById("champion-detail-panel").hidden = true;
+  hoverController.requestToken++; // invalidate any still-in-flight fetch immediately
+}
+
+function positionChampionDetailPanel(anchorEl) {
+  const panel = document.getElementById("champion-detail-panel");
+  const rect = anchorEl.getBoundingClientRect();
+  const panelWidth = 340;
+  let left = rect.right + 12; // open to the RIGHT of the suggestion row by default --
+                                // the suggestions list scrolls, so (unlike the amend popover,
+                                // which always opens below a small fixed-position board cell)
+                                // a below-anchored panel near the bottom of the viewport would
+                                // risk running off-screen; side-anchoring avoids that.
+  if (left + panelWidth > window.innerWidth - 10) {
+    left = rect.left - panelWidth - 12; // flip to the LEFT if that would overflow
+  }
+  if (left < 10) left = Math.max(10, rect.left);
+  panel.style.left = `${left}px`;
+
+  const maxTop = window.innerHeight + window.scrollY - 480 - 10; // 480 = panel max-height
+  const top = rect.top + window.scrollY;
+  panel.style.top = `${Math.max(10, Math.min(top, maxTop))}px`;
+}
+
+function renderChampionDetailPanelLoading(championId) {
+  document.getElementById("cdp-body").hidden = true;
+  document.getElementById("cdp-error").hidden = true;
+  document.getElementById("cdp-loading").hidden = false;
+  document.getElementById("cdp-name").textContent = champName(championId);
+  document.getElementById("cdp-icon").src = champIcon(championId);
+  document.getElementById("cdp-role").textContent = "";
+  document.getElementById("cdp-tier-badge").hidden = true;
+}
+
+function renderChampionDetailPanelError(err) {
+  document.getElementById("cdp-body").hidden = true;
+  document.getElementById("cdp-loading").hidden = true;
+  const errEl = document.getElementById("cdp-error");
+  errEl.hidden = false;
+  errEl.textContent = `Could not load detail: ${err.message}`;
+}
+
+function renderChampionDetailPanel(detail) {
+  document.getElementById("cdp-loading").hidden = true;
+  document.getElementById("cdp-error").hidden = true;
+  document.getElementById("cdp-body").hidden = false;
+
+  document.getElementById("cdp-icon").src = champIcon(detail.champion_id);
+  document.getElementById("cdp-icon").alt = detail.champion_name;
+  document.getElementById("cdp-name").textContent = detail.champion_name;
+  document.getElementById("cdp-role").textContent = detail.role ? `as ${detail.role}` : "role unclear";
+
+  const tierBadge = document.getElementById("cdp-tier-badge");
+  if (detail.global.has_data && detail.global.tier) {
+    tierBadge.hidden = false;
+    tierBadge.textContent = detail.global.tier;
+    tierBadge.className = `cdp-tier-badge tier-${String(detail.global.tier).toLowerCase()}`;
+  } else {
+    tierBadge.hidden = true;
+  }
+
+  renderCdpGlobalStats(detail.global);
+  renderCdpRoster(detail.roster);
+
+  const synergySection = document.getElementById("cdp-synergy-section");
+  const threatSection = document.getElementById("cdp-threat-section");
+  if (detail.action_context === "PICK") {
+    synergySection.hidden = false;
+    threatSection.hidden = true;
+    renderCdpSynergy(detail.synergy_with_picks);
+  } else {
+    synergySection.hidden = true;
+    threatSection.hidden = false;
+    renderCdpThreat(detail.ban_threat);
+  }
+}
+
+function renderCdpGlobalStats(global) {
+  const wr = document.getElementById("cdp-winrate");
+  const pr = document.getElementById("cdp-pickrate");
+  const br = document.getElementById("cdp-banrate");
+  const sample = document.getElementById("cdp-sample");
+
+  if (!global.has_data) {
+    wr.textContent = pr.textContent = br.textContent = "--";
+    sample.textContent = "No tier data for this role/patch yet.";
+    return;
+  }
+  wr.textContent = formatRealPercent(global.win_rate);
+  pr.textContent = formatRealPercent(global.pick_rate);
+  br.textContent = formatRealPercent(global.ban_rate);
+  sample.textContent = global.sample_size
+    ? `Based on ${global.sample_size.toLocaleString()} games`
+    : "Sample size unknown";
+}
+
+function renderCdpRoster(roster) {
+  const el = document.getElementById("cdp-roster-list");
+  el.innerHTML = "";
+  for (const r of roster) {
+    const row = document.createElement("div");
+    row.className = "cdp-roster-row";
+    if (r.is_assigned_to_role) row.classList.add("assigned-role");
+    if (!r.mastery && !r.personal) row.classList.add("no-data");
+
+    const name = document.createElement("span");
+    name.className = "cdp-roster-name";
+    name.textContent = r.display_name;
+    row.appendChild(name);
+
+    const roleTag = document.createElement("span");
+    roleTag.className = "cdp-roster-role-tag";
+    roleTag.textContent = r.assigned_role;
+    row.appendChild(roleTag);
+
+    const stats = document.createElement("span");
+    stats.className = "cdp-roster-stats";
+    if (!r.mastery && !r.personal) {
+      stats.textContent = "No history";
+    } else {
+      const parts = [];
+      if (r.mastery) parts.push(`M${r.mastery.level} · ${r.mastery.points.toLocaleString()} pts`);
+      if (r.personal) parts.push(`${r.personal.games}g, ${formatRealPercent(r.personal.win_rate)} WR`);
+      stats.textContent = parts.join(" · ");
+    }
+    row.appendChild(stats);
+    el.appendChild(row);
+  }
+}
+
+function renderCdpSynergy(synergyRows) {
+  const el = document.getElementById("cdp-synergy-list");
+  el.innerHTML = "";
+  if (!synergyRows || synergyRows.length === 0) {
+    const msg = document.createElement("div");
+    msg.className = "cdp-no-data";
+    msg.textContent = "No synergy data with your current picks yet.";
+    el.appendChild(msg);
+    return;
+  }
+  for (const s of synergyRows) {
+    const row = document.createElement("div");
+    row.className = "cdp-synergy-row";
+    const left = document.createElement("span");
+    left.textContent = `with ${s.ally_champion_name}`;
+    const right = document.createElement("span");
+    right.textContent = `${formatRealPercent(s.win_rate_together)} (${s.games_together}g${s.source === "pro" ? ", pro" : ""})`;
+    row.appendChild(left);
+    row.appendChild(right);
+    el.appendChild(row);
+  }
+}
+
+function renderCdpThreat(threat) {
+  const el = document.getElementById("cdp-threat-list");
+  el.innerHTML = "";
+  if (!threat.counters_comfort_pool || threat.counters_comfort_pool.length === 0) {
+    const msg = document.createElement("div");
+    msg.className = "cdp-no-data";
+    msg.textContent = "No known matchup data against your comfort picks.";
+    el.appendChild(msg);
+  } else {
+    for (const t of threat.counters_comfort_pool) {
+      const row = document.createElement("div");
+      row.className = "cdp-threat-row";
+      const isHighThreat = t.win_rate_against >= 0.55;
+      const left = document.createElement("span");
+      left.textContent = `vs ${t.display_name}'s ${t.comfort_champion_name}`;
+      const right = document.createElement("span");
+      right.className = `cdp-threat-winrate${isHighThreat ? " high" : ""}`;
+      right.textContent = `${formatRealPercent(t.win_rate_against)} (${t.games}g)`;
+      row.appendChild(left);
+      row.appendChild(right);
+      el.appendChild(row);
+    }
+  }
+
+  const fitsEl = document.getElementById("cdp-enemy-fits");
+  if (threat.enemy_fits_role) {
+    fitsEl.hidden = false;
+    fitsEl.textContent = `Also fills their open ${threat.enemy_fits_role}.`;
+  } else {
+    fitsEl.hidden = true;
+  }
 }
 
 /* ============================================================
@@ -927,6 +1241,12 @@ async function onAmendChampionClicked(championId) {
       champion_id: championId,
     });
     state.draft = result;
+    // Unlike enter(), amend() doesn't advance current_slot -- the detail cache's key includes
+    // current_slot for cheap free invalidation on every real pick/ban, but an amend to an
+    // EARLIER slot can change our_picks_so_far()/their_picks_so_far() (affecting synergy/threat
+    // data) without that key changing. Amends are rare and deliberate, so a full cache-bust
+    // here is cheap insurance rather than building a more surgical partial-invalidation scheme.
+    hoverController.cache.clear();
     closeAmendPopover();
     renderDraft();
   } catch (e) {

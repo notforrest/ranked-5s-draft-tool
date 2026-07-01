@@ -307,6 +307,30 @@ button { font-family: var(--font); cursor: pointer; }
   text-overflow: ellipsis;
 }
 
+/* Role badge (auto-assigned/overridden role) -- a real <select>, styled compact, overlaid at
+   the top of a filled our-side pick cell so the click-to-change interaction is native and
+   accessible rather than a hand-built popover. */
+.role-badge-select {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  z-index: 3;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  text-align-last: center;
+  border: none;
+  border-radius: 4px;
+  padding: 1px 2px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.role-badge-select.role-badge-set { background: var(--bg-panel-raised); color: var(--text); border: 1px solid var(--border); }
+.role-badge-select.role-badge-override { background: var(--blue-dim); color: #cfe0ff; border: 1px solid var(--blue); }
+.role-badge-select.role-badge-unknown { background: var(--amber); color: #241a00; }
+
 /* Champion grid */
 .champ-panel { grid-area: champs; background: var(--bg-panel); border-radius: var(--radius); border: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; }
 .champ-search {
@@ -422,3 +446,106 @@ button { font-family: var(--font); cursor: pointer; }
   padding: 0 4px;
 }
 .amend-popover-close:hover { color: var(--text); }
+
+/* ============================================================
+   Champion detail hover panel
+   ============================================================ */
+.champion-detail-panel {
+  position: fixed;
+  z-index: 110;
+  width: 340px;
+  max-height: 480px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  padding: 0;
+  font-size: 13px;
+}
+.champion-detail-panel[hidden] { display: none; }
+
+.champion-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel);
+}
+.cdp-icon { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.cdp-header-text { flex: 1; min-width: 0; }
+.cdp-name { font-weight: 700; font-size: 15px; }
+.cdp-role { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+.cdp-tier-badge {
+  flex-shrink: 0;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+}
+.cdp-tier-badge[hidden] { display: none; }
+.cdp-tier-badge.tier-s { background: var(--amber); color: #241a00; border-color: var(--amber); }
+.cdp-tier-badge.tier-a { background: var(--green); color: #062910; border-color: var(--green); }
+
+.cdp-loading, .cdp-error { padding: 16px 12px; color: var(--text-dim); text-align: center; }
+.cdp-error { color: #ff8a8a; }
+
+.cdp-body { padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.cdp-body[hidden] { display: none; }
+
+.cdp-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+.cdp-stat-row { display: flex; gap: 14px; }
+.cdp-stat { display: flex; flex-direction: column; }
+.cdp-stat-value { font-size: 17px; font-weight: 800; color: var(--text); }
+.cdp-stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; display: block; }
+.cdp-sample { margin-top: 4px; font-size: 11px; color: var(--text-dim); }
+.cdp-no-data { color: var(--text-dim); font-style: italic; font-size: 12px; }
+
+.cdp-roster-list { display: flex; flex-direction: column; gap: 6px; }
+.cdp-roster-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-panel-raised);
+}
+.cdp-roster-row.assigned-role { border: 1px solid var(--green); }
+.cdp-roster-name { font-weight: 600; flex: 0 0 auto; min-width: 70px; }
+.cdp-roster-role-tag {
+  font-size: 9px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+.cdp-roster-stats { flex: 1; text-align: right; font-size: 12px; color: var(--text-dim); }
+.cdp-roster-stats .cdp-highlight { color: var(--text); font-weight: 700; }
+.cdp-roster-row.no-data .cdp-roster-stats { font-style: italic; opacity: 0.6; }
+
+.cdp-synergy-list, .cdp-threat-list { display: flex; flex-direction: column; gap: 4px; }
+.cdp-synergy-row, .cdp-threat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+}
+.cdp-threat-row .cdp-threat-winrate.high { color: var(--red); font-weight: 700; }
+.cdp-enemy-fits { margin-top: 8px; font-size: 12px; color: var(--amber); }
+.cdp-enemy-fits[hidden] { display: none; }

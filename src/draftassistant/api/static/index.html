@@ -148,6 +148,49 @@
   <div class="champ-grid champ-grid-small" id="amend-grid"></div>
 </div>
 
+<!-- Champion detail hover panel (shared, repositioned via JS, reuses amend-popover's anchor pattern) -->
+<div id="champion-detail-panel" class="champion-detail-panel" hidden>
+  <div class="champion-detail-header">
+    <img id="cdp-icon" class="cdp-icon" alt="">
+    <div class="cdp-header-text">
+      <div id="cdp-name" class="cdp-name"></div>
+      <div id="cdp-role" class="cdp-role"></div>
+    </div>
+    <span id="cdp-tier-badge" class="cdp-tier-badge"></span>
+  </div>
+
+  <div id="cdp-loading" class="cdp-loading" hidden>Loading&hellip;</div>
+  <div id="cdp-error" class="cdp-error" hidden></div>
+
+  <div id="cdp-body" class="cdp-body">
+    <div class="cdp-section">
+      <div class="cdp-section-title">Global (this patch)</div>
+      <div class="cdp-stat-row">
+        <span class="cdp-stat"><span id="cdp-winrate" class="cdp-stat-value"></span><span class="cdp-stat-label">Win rate</span></span>
+        <span class="cdp-stat"><span id="cdp-pickrate" class="cdp-stat-value"></span><span class="cdp-stat-label">Pick rate</span></span>
+        <span class="cdp-stat"><span id="cdp-banrate" class="cdp-stat-value"></span><span class="cdp-stat-label">Ban rate</span></span>
+      </div>
+      <div id="cdp-sample" class="cdp-sample"></div>
+    </div>
+
+    <div class="cdp-section">
+      <div class="cdp-section-title">Your roster</div>
+      <div id="cdp-roster-list" class="cdp-roster-list"></div>
+    </div>
+
+    <div id="cdp-synergy-section" class="cdp-section" hidden>
+      <div class="cdp-section-title">Synergy with your picks</div>
+      <div id="cdp-synergy-list" class="cdp-synergy-list"></div>
+    </div>
+
+    <div id="cdp-threat-section" class="cdp-section" hidden>
+      <div class="cdp-section-title">Threatens your comfort picks</div>
+      <div id="cdp-threat-list" class="cdp-threat-list"></div>
+      <div id="cdp-enemy-fits" class="cdp-enemy-fits" hidden></div>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

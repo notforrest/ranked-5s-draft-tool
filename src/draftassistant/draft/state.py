@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from draftassistant.draft.sequence import DRAFT_SEQUENCE
+from draftassistant import config
+from draftassistant.draft.sequence import DRAFT_SEQUENCE, PICK
 
 
 class DraftValidationError(Exception):
@@ -28,6 +29,9 @@ class DraftEntry:
     entered_at: str  # ISO-8601 timestamp string, caller/UI-supplied precision
     amended_count: int = 0
     invalidated: bool = False  # flagged (not deleted) when a later amend() creates a collision
+    role_override: str | None = None  # user-set role, takes precedence over auto-resolution
+                                        # (see draft/queries.py:resolve_pick_roles); None means
+                                        # "no override, use the auto-resolved role"
 
 
 @dataclass
@@ -116,6 +120,38 @@ class DraftState:
                 newly_flagged.append(j)
         return newly_flagged
 
+    def set_role_override(self, slot: int, role: str) -> None:
+        """Manually pins `slot`'s role, overriding whatever draft/queries.py's
+        resolve_pick_roles would otherwise auto-compute for it. Valid only against an
+        already-filled PICK slot for OUR side -- there is no role concept for a ban, an
+        opponent's pick (we don't drive their roster), or a slot that hasn't been entered yet.
+        Raises DraftValidationError and leaves state untouched on any violation, consistent with
+        enter()/amend()'s existing convention."""
+        entry = self._require_filled(slot)
+        slot_def = DRAFT_SEQUENCE[slot]
+        if slot_def.action != PICK:
+            raise DraftValidationError(f"slot {slot} is a {slot_def.action}, not a PICK; role overrides only apply to picks")
+        if slot_def.side != self.our_side:
+            raise DraftValidationError(f"slot {slot} is the opponent's pick; we don't assign roles to their roster")
+        if role not in config.VALID_ROLES:
+            raise DraftValidationError(f"role {role!r} is not a valid role; must be one of {config.VALID_ROLES}")
+        entry.role_override = role
+
+    def clear_role_override(self, slot: int) -> None:
+        """Removes a manual override, reverting `slot` to auto-resolution. A no-op (not an
+        error) if the slot had no override set -- mirrors amend()'s self-reassignment no-op
+        philosophy: clearing an already-clear thing is harmless, not a caller mistake."""
+        entry = self._require_filled(slot)
+        entry.role_override = None
+
+    def _require_filled(self, slot: int) -> DraftEntry:
+        if not 0 <= slot < len(self.entries):
+            raise DraftValidationError(f"slot {slot} is out of range [0, {len(self.entries)})")
+        entry = self.entries[slot]
+        if entry is None:
+            raise DraftValidationError(f"slot {slot} is not filled; nothing to set a role override on")
+        return entry
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -159,6 +195,7 @@ class DraftState:
                     "entered_at": e.entered_at,
                     "amended_count": e.amended_count,
                     "invalidated": e.invalidated,
+                    "role_override": e.role_override,
                 }
                 for e in self.entries
             ],
@@ -181,6 +218,7 @@ class DraftState:
                 entered_at=e["entered_at"],
                 amended_count=e.get("amended_count", 0),
                 invalidated=e.get("invalidated", False),
+                role_override=e.get("role_override"),
             )
             for e in d["entries"]
         ]
