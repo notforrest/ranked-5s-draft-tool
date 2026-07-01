@@ -1,4 +1,4 @@
--- LoL Ranked 5s Draft Assistant -- database schema.
+-- Ranked 5s Draft Tool -- database schema.
 -- Single source of truth for all tables. Applied fresh by scripts/init_db.py.
 -- See /Users/forrestsun/.claude/plans/my-friends-and-i-nifty-wozniak.md for design rationale.
 

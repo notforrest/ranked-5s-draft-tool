@@ -1,4 +1,4 @@
-# LoL Ranked 5s Draft Assistant
+# Ranked 5s Draft Tool
 
 A local, single-driver tool for live Tournament Draft champion-select suggestions, combining
 your group's Riot data (mastery, personal win rates) with a curated tier list and pro-match
@@ -11,7 +11,7 @@ they happen in the real client, sharing their screen or calling out suggestions 
 ## 1. One-time setup
 
 ```bash
-cd lol-draft-assistant
+cd ranked-5s-draft-tool
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

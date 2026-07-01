@@ -14,7 +14,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="LoL Ranked 5s Draft Assistant")
+    app = FastAPI(title="Ranked 5s Draft Tool")
 
     app.include_router(roster.router, prefix="/api")
     app.include_router(refresh.router, prefix="/api")
