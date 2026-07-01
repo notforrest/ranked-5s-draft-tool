@@ -54,6 +54,25 @@ def update_riot_id(conn: sqlite3.Connection, player_id: int, *, riot_game_name: 
     )
 
 
+def delete_player(conn: sqlite3.Connection, player_id: int) -> dict[str, int]:
+    """Permanently removes a player and every row that references them (session lineups, match
+    history, mastery, personal stats, refresh watermark) -- for cleaning up a duplicate or
+    mistaken roster entry. There's no soft-delete/is_active toggle used anywhere in this
+    codebase currently, so this is a real, permanent delete; foreign keys are enforced
+    (connection.py sets PRAGMA foreign_keys = ON), so dependents must be cleared before the
+    `players` row itself, in this order. Returns a {table: rows_deleted} summary for display.
+    Matches (the `matches` table / cached JSON on disk) are left alone -- a match isn't "owned"
+    by one player, other roster members may have played in it too."""
+    counts: dict[str, int] = {}
+    for table in ("session_lineup", "match_participants", "personal_champion_stats",
+                  "champion_mastery", "refresh_state"):
+        cur = conn.execute(f"DELETE FROM {table} WHERE player_id = ?", (player_id,))
+        counts[table] = cur.rowcount
+    cur = conn.execute("DELETE FROM players WHERE player_id = ?", (player_id,))
+    counts["players"] = cur.rowcount
+    return counts
+
+
 def get_active_players(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute("SELECT * FROM players WHERE is_active = 1 ORDER BY display_name").fetchall()
     return [_row_to_player(r) for r in rows]
