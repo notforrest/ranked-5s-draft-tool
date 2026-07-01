@@ -41,7 +41,7 @@ python scripts/sync_champions.py
 
 ## 4. Add your roster
 
-The web UI's setup screen only lets you *select* from your roster -- populate it from a file:
+The web UI's setup screen only lets you _select_ from your roster -- populate it from a file:
 copy `data/curated/roster.yaml.template` to `data/curated/roster.yaml` (drop the `.template`
 suffix), fill in one entry per friend (Riot ID, region, preferred role), then:
 
@@ -65,15 +65,15 @@ feeding suggestions (personal mastery/win-rate and role-fit still apply either w
   If it's ever down/broken, the manual path still works independently: copy
   `data/curated/tier_list/EXAMPLE.yaml.template` to e.g. `data/curated/tier_list/14.13.yaml`,
   fill in numbers by hand from any site you like, then `python scripts/import_tier_list.py
-  data/curated/tier_list/14.13.yaml`.
+data/curated/tier_list/14.13.yaml`.
 - **Pro-match synergy data (Oracle's Elixir)**: download the current file from
-  [oracleselixir.com/tools/downloads](https://oracleselixir.com/tools/downloads) yourself (the
+  [Oracle's Elixir](https://drive.google.com/drive/u/1/folders/1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH) yourself (the
   exact link isn't stable enough to hardcode), then either:
-  - **Upload it** via the "Upload CSV" button on the setup screen's "4. Meta Data" panel, or
-  - **Configure it once** by pasting the link into `.env` as `ORACLES_ELIXIR_CSV_URL=...`, after
-    which the setup screen's "Fetch from Configured URL" button downloads and imports it
-    automatically -- only re-paste the link if it goes stale (roughly once per split).
-  - CLI equivalent: `python scripts/import_oracles_elixir.py path/to/downloaded.csv`.
+    - **Upload it** via the "Upload CSV" button on the setup screen's "4. Meta Data" panel, or
+    - **Configure it once** by pasting the link into `.env` as `ORACLES_ELIXIR_CSV_URL=...`, after
+      which the setup screen's "Fetch from Configured URL" button downloads and imports it
+      automatically -- only re-paste the link if it goes stale (roughly once per split).
+    - CLI equivalent: `python scripts/import_oracles_elixir.py path/to/downloaded.csv`.
 
 ## 6. Before each session: refresh personal data
 
@@ -81,7 +81,7 @@ feeding suggestions (personal mastery/win-rate and role-fit still apply either w
 python scripts/run_pre_draft_refresh.py
 ```
 
-Pulls fresh mastery + match history for your roster. Run this *before* queuing up, not during a
+Pulls fresh mastery + match history for your roster. Run this _before_ queuing up, not during a
 draft -- it makes real network calls and can take a little while. If it fails with an
 auth/expired-key error, get a fresh key (step 2) and re-run; it's incremental, so re-running is
 cheap.
