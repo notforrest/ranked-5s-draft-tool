@@ -1,0 +1,56 @@
+# Example curated global tier-list file.
+#
+# This is a TEMPLATE, not real data -- the .template suffix keeps scripts/import_tier_list.py
+# from picking this file up when importing a directory of *.yaml files.
+#
+# To use: copy this file to a real patch-numbered name (e.g. 14.13.yaml) in this same directory,
+# WITHOUT the .template suffix, then replace every value below with real numbers copied by hand
+# from a third-party site (u.gg, op.gg, lolalytics, etc.) for the patch you care about. Riot's
+# own API does not expose global win/pick/ban rate data -- this file is the only source for it,
+# and it is exactly as fresh as the last time a human updated it.
+#
+# Import with: python scripts/import_tier_list.py data/curated/tier_list/14.13.yaml
+
+patch: "14.13"
+source_note: "PLACEHOLDER — replace with real values from a tier-list site before relying on this data"
+
+entries:
+  - champion: "Ahri"
+    role: "MID"
+    win_rate: 0.51
+    pick_rate: 0.08
+    ban_rate: 0.02
+    tier: "A"
+    sample_size: 42000
+
+  - champion: "Lee Sin"
+    role: "JUNGLE"
+    win_rate: 0.49
+    pick_rate: 0.12
+    ban_rate: 0.03
+    tier: "B"
+    sample_size: 61000
+
+  - champion: "Thresh"
+    role: "SUPPORT"
+    win_rate: 0.50
+    pick_rate: 0.10
+    ban_rate: 0.01
+    tier: "A"
+    sample_size: 55000
+
+  - champion: "Jinx"
+    role: "BOTTOM"
+    win_rate: 0.52
+    pick_rate: 0.15
+    ban_rate: 0.04
+    tier: "S"
+    sample_size: 70000
+
+  - champion: "Malphite"
+    role: "TOP"
+    win_rate: 0.53
+    pick_rate: 0.06
+    ban_rate: 0.05
+    tier: "A"
+    sample_size: 30000

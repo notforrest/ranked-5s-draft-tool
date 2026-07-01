@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoL Ranked 5s Draft Assistant</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- SETUP VIEW                                                    -->
+<!-- ============================================================ -->
+<section id="setup-view" class="view">
+  <header class="setup-header">
+    <h1>Ranked 5s Draft Assistant</h1>
+    <p class="subtitle">Set up your lineup, refresh data, then start the draft.</p>
+  </header>
+
+  <div class="setup-grid">
+
+    <div class="panel">
+      <h2>1. Refresh Data</h2>
+      <p class="panel-hint">Pulls the latest mastery + match history from Riot's API. Takes a
+        little while (real network calls) &mdash; run this before queuing, not during a draft.</p>
+      <div id="refresh-last" class="refresh-last">Last refreshed: checking&hellip;</div>
+      <button id="refresh-btn" class="btn btn-secondary">Refresh Data</button>
+      <div id="refresh-status" class="refresh-status" hidden></div>
+    </div>
+
+    <div class="panel">
+      <h2>2. Pick Your 5</h2>
+      <p class="panel-hint">Select exactly 5 active players and assign each a role. Every role
+        must be covered exactly once.</p>
+      <div id="roster-list" class="roster-list">Loading roster&hellip;</div>
+      <div id="role-validation" class="role-validation"></div>
+    </div>
+
+    <div class="panel">
+      <h2>3. Our Side</h2>
+      <p class="panel-hint">Which side did matchmaking assign us?</p>
+      <div class="side-toggle" id="side-toggle">
+        <button class="side-btn side-blue active" data-side="BLUE">BLUE</button>
+        <button class="side-btn side-red" data-side="RED">RED</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="setup-actions">
+    <button id="start-draft-btn" class="btn btn-primary" disabled>Start Draft</button>
+    <div id="start-draft-error" class="error-text" hidden></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- DRAFT VIEW                                                    -->
+<!-- ============================================================ -->
+<section id="draft-view" class="view" hidden>
+
+  <div id="step-banner" class="step-banner">
+    <span id="step-banner-text">Loading draft&hellip;</span>
+  </div>
+
+  <div id="invalidated-banner" class="invalidated-banner" hidden></div>
+
+  <div class="draft-layout">
+
+    <!-- Two-column draft board -->
+    <div class="board" id="board">
+      <div class="board-col board-blue">
+        <h3>Blue</h3>
+        <div class="board-section">
+          <div class="board-label">Bans</div>
+          <div class="board-row" id="blue-bans"></div>
+        </div>
+        <div class="board-section">
+          <div class="board-label">Picks</div>
+          <div class="board-row board-row-picks" id="blue-picks"></div>
+        </div>
+      </div>
+      <div class="board-col board-red">
+        <h3>Red</h3>
+        <div class="board-section">
+          <div class="board-label">Bans</div>
+          <div class="board-row" id="red-bans"></div>
+        </div>
+        <div class="board-section">
+          <div class="board-label">Picks</div>
+          <div class="board-row board-row-picks" id="red-picks"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Champion grid -->
+    <div class="champ-panel">
+      <input type="text" id="champ-search" class="champ-search" placeholder="Search champions&hellip;">
+      <div class="champ-grid" id="champ-grid">Loading champions&hellip;</div>
+    </div>
+
+    <!-- Suggestions -->
+    <div class="suggestions-panel">
+      <h3 id="suggestions-title">Suggestions</h3>
+      <div class="suggestions-list" id="suggestions-list"></div>
+    </div>
+
+  </div>
+
+  <div class="draft-footer">
+    <button id="new-draft-btn" class="btn btn-secondary">New Draft</button>
+  </div>
+</section>
+
+<!-- Inline "fix a slot" popover (shared, repositioned via JS) -->
+<div id="amend-popover" class="amend-popover" hidden>
+  <div class="amend-popover-header">
+    <span id="amend-popover-title">Fix this slot</span>
+    <button id="amend-popover-close" class="amend-popover-close">&times;</button>
+  </div>
+  <input type="text" id="amend-search" class="champ-search" placeholder="Search champions&hellip;">
+  <div class="champ-grid champ-grid-small" id="amend-grid"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

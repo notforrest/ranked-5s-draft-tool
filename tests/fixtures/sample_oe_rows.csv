@@ -1,0 +1,25 @@
+gameid,participantid,playerid,side,position,playername,teamname,teamid,champion,ban1,ban2,ban3,ban4,ban5,result,league,year,split,playoffs,date,patch,gamelength,datacompleteness
+GAME1,1,P1,Blue,top,Toplaner1,Team Alpha,TEAM_ALPHA,Malphite,Zed,Yasuo,Akali,Vayne,Camille,1,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,2,P2,Blue,jng,Jgler1,Team Alpha,TEAM_ALPHA,Lee Sin,Zed,Yasuo,Akali,Vayne,Camille,1,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,3,P3,Blue,mid,Midlaner1,Team Alpha,TEAM_ALPHA,Ahri,Zed,Yasuo,Akali,Vayne,Camille,1,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,4,P4,Blue,bot,Adcarry1,Team Alpha,TEAM_ALPHA,Jinx,Zed,Yasuo,Akali,Vayne,Camille,1,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,5,P5,Blue,sup,Support1,Team Alpha,TEAM_ALPHA,Thresh,Zed,Yasuo,Akali,Vayne,Camille,1,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,100,,Blue,team,Team Alpha,Team Alpha,TEAM_ALPHA,,Zed,Yasuo,Akali,Vayne,Camille,1,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,6,P6,Red,top,Toplaner2,Team Beta,TEAM_BETA,Camille,Malphite,Lee Sin,Ahri,Jinx,Thresh,0,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,7,P7,Red,jng,Jgler2,Team Beta,TEAM_BETA,Vi,Malphite,Lee Sin,Ahri,Jinx,Thresh,0,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,8,P8,Red,mid,Midlaner2,Team Beta,TEAM_BETA,Zed,Malphite,Lee Sin,Ahri,Jinx,Thresh,0,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,9,P9,Red,bot,Adcarry2,Team Beta,TEAM_BETA,Vayne,Malphite,Lee Sin,Ahri,Jinx,Thresh,0,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,10,P10,Red,sup,Support2,Team Beta,TEAM_BETA,Nautilus,Malphite,Lee Sin,Ahri,Jinx,Thresh,0,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME1,200,,Red,team,Team Beta,Team Beta,TEAM_BETA,,Malphite,Lee Sin,Ahri,Jinx,Thresh,0,LCS,2024,Summer,0,2024-07-01 20:00:00,14.13,1800,complete
+GAME2,1,P11,Blue,top,Toplaner3,Team Gamma,TEAM_GAMMA,Malphite,Camille,Vi,Zed,Vayne,Nautilus,0,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,2,P12,Blue,jng,Jgler3,Team Gamma,TEAM_GAMMA,Lee Sin,Camille,Vi,Zed,Vayne,Nautilus,0,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,3,P13,Blue,mid,Midlaner3,Team Gamma,TEAM_GAMMA,Ahri,Camille,Vi,Zed,Vayne,Nautilus,0,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,4,P14,Blue,bot,Adcarry3,Team Gamma,TEAM_GAMMA,Jinx,Camille,Vi,Zed,Vayne,Nautilus,0,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,5,P15,Blue,sup,Support3,Team Gamma,TEAM_GAMMA,Thresh,Camille,Vi,Zed,Vayne,Nautilus,0,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,100,,Blue,team,Team Gamma,Team Gamma,TEAM_GAMMA,,Camille,Vi,Zed,Vayne,Nautilus,0,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,6,P16,Red,top,Toplaner4,Team Delta,TEAM_DELTA,Camille,Malphite,Lee Sin,Ahri,Jinx,Thresh,1,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,7,P17,Red,jng,Jgler4,Team Delta,TEAM_DELTA,Vi,Malphite,Lee Sin,Ahri,Jinx,Thresh,1,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,8,P18,Red,mid,Midlaner4,Team Delta,TEAM_DELTA,Zed,Malphite,Lee Sin,Ahri,Jinx,Thresh,1,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,9,P19,Red,bot,Adcarry4,Team Delta,TEAM_DELTA,Vayne,Malphite,Lee Sin,Ahri,Jinx,Thresh,1,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,10,P20,Red,sup,Support4,Team Delta,TEAM_DELTA,Nautilus,Malphite,Lee Sin,Ahri,Jinx,Thresh,1,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
+GAME2,200,,Red,team,Team Delta,Team Delta,TEAM_DELTA,,Malphite,Lee Sin,Ahri,Jinx,Thresh,1,LCS,2024,Summer,0,2024-07-02 20:00:00,14.13,2100,complete
