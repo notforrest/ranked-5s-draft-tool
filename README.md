@@ -41,13 +41,17 @@ python scripts/sync_champions.py
 
 ## 4. Add your roster
 
-The web UI's setup screen only lets you *select* from your roster -- add players with:
+The web UI's setup screen only lets you *select* from your roster -- populate it from a file:
+copy `data/curated/roster.yaml.template` to `data/curated/roster.yaml` (drop the `.template`
+suffix), fill in one entry per friend (Riot ID, region, preferred role), then:
 
 ```bash
-python scripts/add_player.py "Forrest" "ForrestSun" "NA1" --roles MID
-python scripts/add_player.py "Alex" "AlexPlays" "NA1" --roles TOP
-# ... one per friend. --platform-region defaults to na1; pass --platform-region euw1 etc. if needed.
+python scripts/import_roster.py data/curated/roster.yaml
 ```
+
+Re-run that command any time you edit the file -- adding a friend, fixing a typo'd Riot ID, or
+changing someone's role. It's an upsert (matched by Riot ID), so re-importing never deletes
+anyone.
 
 ## 5. (Optional but recommended) Load meta/synergy data
 

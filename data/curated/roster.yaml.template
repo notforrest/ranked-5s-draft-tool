@@ -1,0 +1,30 @@
+# Example roster file.
+#
+# This is a TEMPLATE, not real data -- the .template suffix keeps it from being mistaken for
+# the real file. Copy it to `roster.yaml` (drop the .template suffix) in this same directory,
+# replace the entries below with your actual friend group's Riot IDs, then import with:
+#
+#   python scripts/import_roster.py data/curated/roster.yaml
+#
+# Re-run that command any time you edit the file -- adding a friend, fixing a typo'd Riot ID,
+# or changing someone's preferred role. It's an upsert: existing players are updated in place
+# (matched by Riot ID), nothing is ever deleted by re-importing.
+
+players:
+  - display_name: "Forrest"        # friendly name shown in the UI
+    riot_game_name: "ForrestSun"    # Riot ID before the #
+    tag_line: "NA1"                 # Riot ID after the #
+    platform_region: "na1"          # na1 | euw1 | eun1 | kr | jp1 | br1 | la1 | la2 | oc1 | tr1 | ru
+    preferred_roles: ["MID"]        # informational default; list 2+ for a flex player
+
+  - display_name: "Alex"
+    riot_game_name: "AlexPlays"
+    tag_line: "NA1"
+    platform_region: "na1"
+    preferred_roles: ["TOP"]
+
+  - display_name: "Sam"
+    riot_game_name: "SamJungles"
+    tag_line: "NA1"
+    platform_region: "na1"
+    preferred_roles: ["JUNGLE"]
