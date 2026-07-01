@@ -36,15 +36,7 @@ unrestricted network (e.g. home wifi) instead.
 ## 3. Sync champion data (one-time, then occasionally per patch)
 
 ```bash
-python3 -c "
-from draftassistant.db import connection
-from draftassistant.staticdata import ddragon_client
-conn = connection.get_conn()
-version = ddragon_client.get_latest_version()
-ddragon_client.sync_champions(conn)
-conn.commit()
-print('synced', version)
-"
+python scripts/sync_champions.py
 ```
 
 ## 4. Add your roster
