@@ -9,6 +9,7 @@ import respx
 from draftassistant import config
 from draftassistant.db.repositories import champion_repo, match_repo, roster_repo
 from draftassistant.refresh import pre_draft_refresh
+from draftassistant.riot_client import endpoints
 
 PUUID = "fake-puuid-0001"
 MATCH_ID = "NA1_9999999999"
@@ -159,6 +160,119 @@ def test_full_refresh_happy_path(test_db_conn, tmp_path, monkeypatch):
     assert stats_rows[0]["champion_id"] == 1
     assert stats_rows[0]["games"] == 1
     assert stats_rows[0]["wins"] == 1
+
+
+def test_first_time_backfill_pages_through_all_ranked_matches(test_db_conn, tmp_path, monkeypatch):
+    """The bug this fixes: a first-time backfill used to stop at a single fixed-size window
+    (config.INITIAL_BACKFILL_MAX_MATCHES, formerly 50) regardless of queue, so a player's real
+    ranked history could be undercounted if non-ranked games shared that window. Now it pages
+    through Match-V5 (type=ranked) until a short page, so all of a player's ranked matches --
+    spanning more than one page -- must be fetched and aggregated, not just the first page."""
+    monkeypatch.setattr(config, "RAW_MATCHES_DIR", tmp_path / "matches")
+    monkeypatch.setattr(config, "RIOT_API_KEY", "RGAPI-fake")
+    monkeypatch.setattr(endpoints, "_MATCH_IDS_PAGE_SIZE", 2)  # small page size, keeps the test light
+
+    player_id = _seed_player(test_db_conn)
+    _seed_champion(test_db_conn, champion_id=1, name="Ahri")
+    _seed_champion(test_db_conn, champion_id=2, name="LeeSin")
+    test_db_conn.commit()
+
+    match_ids = ["NA1_1001", "NA1_1002", "NA1_1003"]  # 2 full pages (size 2) + 1 short page
+
+    with respx.mock:
+        _mock_account_endpoint()
+        _mock_mastery_endpoint()
+        respx.get(url__regex=rf"https://americas\.api\.riotgames\.com/lol/match/v5/matches/by-puuid/{PUUID}/ids.*").mock(
+            side_effect=[
+                httpx.Response(200, json=match_ids[0:2]),
+                httpx.Response(200, json=match_ids[2:3]),
+            ]
+        )
+        for i, match_id in enumerate(match_ids):
+            _mock_match_detail_endpoint(
+                match_id=match_id,
+                payload=_match_detail_payload(match_id=match_id, game_creation_ms=1700000000000 + i),
+            )
+
+        summary = pre_draft_refresh.run(test_db_conn)
+
+    assert summary["status"] == "success"
+    player_summary = summary["players"][0]
+    assert player_summary["new_matches_fetched"] == 3
+    assert player_summary["match_ids_seen"] == 3
+
+    match_rows = test_db_conn.execute("SELECT match_id FROM matches").fetchall()
+    assert {r["match_id"] for r in match_rows} == set(match_ids)
+
+    # All 3 games landed on the same champion -- personal stats must reflect all 3, not just
+    # whatever the first page alone would have covered.
+    stats_row = test_db_conn.execute(
+        "SELECT games FROM personal_champion_stats WHERE player_id = ? AND champion_id = 1",
+        (player_id,),
+    ).fetchone()
+    assert stats_row["games"] == 3
+
+
+def test_reset_refresh_state_makes_the_next_refresh_a_full_backfill_again(test_db_conn, tmp_path, monkeypatch):
+    """The retroactive-fix workflow: a player already refreshed under the OLD narrow-window
+    backfill has a watermark that would make a future refresh purely incremental, silently never
+    going back to pick up older ranked games the old code missed. match_repo.reset_refresh_state
+    must clear that watermark so the very next refresh re-lists (and backfills) the player's full
+    ranked history again -- an older match must get picked up even though it wasn't part of the
+    original "recent" window."""
+    monkeypatch.setattr(config, "RAW_MATCHES_DIR", tmp_path / "matches")
+    monkeypatch.setattr(config, "RIOT_API_KEY", "RGAPI-fake")
+
+    player_id = _seed_player(test_db_conn)
+    _seed_champion(test_db_conn, champion_id=1, name="Ahri")
+    _seed_champion(test_db_conn, champion_id=2, name="LeeSin")
+    test_db_conn.commit()
+
+    old_match = "NA1_OLD_0001"  # simulates a ranked game the old narrow window missed
+    recent_match = "NA1_RECENT_0001"
+
+    # Simulate a prior refresh (under the old code) that only ever saw the recent match, and
+    # already advanced the watermark past it.
+    match_repo.upsert_refresh_state(test_db_conn, player_id, last_match_fetched_ms=1700000900000, status="ok")
+    test_db_conn.commit()
+
+    with respx.mock:
+        _mock_account_endpoint()
+        _mock_mastery_endpoint()
+        _mock_match_ids_endpoint(match_ids=[])  # nothing new since the watermark
+        summary = pre_draft_refresh.run(test_db_conn)
+    assert summary["players"][0]["new_matches_fetched"] == 0
+
+    was_reset = match_repo.reset_refresh_state(test_db_conn, player_id)
+    test_db_conn.commit()
+    assert was_reset is True
+    assert match_repo.get_refresh_state(test_db_conn, player_id) is None
+
+    with respx.mock:
+        _mock_account_endpoint()
+        _mock_mastery_endpoint()
+        # Now treated as first-time again: the full ranked history comes back, including the
+        # older match the prior (pre-reset) incremental-only refresh could never have reached.
+        _mock_match_ids_endpoint(match_ids=[old_match, recent_match])
+        _mock_match_detail_endpoint(
+            match_id=old_match,
+            payload=_match_detail_payload(match_id=old_match, game_creation_ms=1600000000000),
+        )
+        _mock_match_detail_endpoint(
+            match_id=recent_match,
+            payload=_match_detail_payload(match_id=recent_match, game_creation_ms=1700000900000),
+        )
+        summary = pre_draft_refresh.run(test_db_conn)
+
+    assert summary["players"][0]["new_matches_fetched"] == 2
+    match_rows = test_db_conn.execute("SELECT match_id FROM matches").fetchall()
+    assert {r["match_id"] for r in match_rows} == {old_match, recent_match}
+
+
+def test_reset_refresh_state_on_player_with_no_watermark_returns_false(test_db_conn):
+    player_id = _seed_player(test_db_conn)
+    test_db_conn.commit()
+    assert match_repo.reset_refresh_state(test_db_conn, player_id) is False
 
 
 def test_incremental_refresh_skips_already_fetched_match(test_db_conn, tmp_path, monkeypatch):

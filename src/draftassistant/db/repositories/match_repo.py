@@ -66,6 +66,17 @@ def get_refresh_state(conn: sqlite3.Connection, player_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def reset_refresh_state(conn: sqlite3.Connection, player_id: int) -> bool:
+    """Deletes a player's refresh watermark so their next refresh is treated as first-time --
+    a full paginated ranked backfill (see refresh/pre_draft_refresh.py) rather than "only matches
+    since last watermark". Already-cached matches are skipped via match_exists(), so this is
+    cheap even though it re-lists the player's whole ranked history; personal_champion_stats is
+    rebuilt wholesale on every refresh regardless, so newly-backfilled older matches are picked
+    up automatically once inserted. Returns whether a watermark row existed to reset."""
+    cur = conn.execute("DELETE FROM refresh_state WHERE player_id = ?", (player_id,))
+    return cur.rowcount > 0
+
+
 def upsert_refresh_state(conn: sqlite3.Connection, player_id: int, *,
                           last_match_fetched_ms: int | None, status: str,
                           error_message: str | None = None) -> None:

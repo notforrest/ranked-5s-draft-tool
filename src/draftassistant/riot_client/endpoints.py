@@ -67,25 +67,67 @@ def get_champion_mastery(client: RiotAPIClient, puuid: str, platform_region: str
     )
 
 
+_MATCH_IDS_PAGE_SIZE = 100  # Riot's documented max for the `count` query param.
+
+
 def get_match_ids(
     client: RiotAPIClient,
     puuid: str,
     account_region: str,
     *,
-    start_time_epoch_s: int | None = None,
+    start: int = 0,
     count: int = 100,
+    start_time_epoch_s: int | None = None,
+    match_type: str | None = None,
 ) -> list[str]:
-    """List of match ids for a player, newest-relevant window controlled by `count` and
-    optionally `start_time_epoch_s` (Match-V5's `startTime` query param, epoch SECONDS). Uses
-    REGIONAL routing. No cache -- this list grows over time and must always hit the network."""
-    query = f"?count={count}"
+    """A single page of match ids for a player -- newest-first, windowed by `start`/`count` and
+    optionally `start_time_epoch_s` (Match-V5's `startTime` query param, epoch SECONDS) and
+    `match_type` (Match-V5's `type` param: "ranked"/"normal"/"tourney"/...). `type=ranked` covers
+    BOTH queue 420 (Solo/Duo) and 440 (Flex) in one call -- Riot's per-queue `queue` param only
+    accepts a single id, so `type` is the right filter for this project's config.RANKED_QUEUE_IDS.
+    Uses REGIONAL routing. No cache -- this list grows over time and must always hit the network.
+
+    For fetching a player's full ranked history, use get_all_ranked_match_ids instead -- this is
+    the single-page primitive it's built on."""
+    query = f"?start={start}&count={count}"
     if start_time_epoch_s is not None:
         query += f"&startTime={start_time_epoch_s}"
+    if match_type is not None:
+        query += f"&type={match_type}"
     return _get_with_retry(
         client,
         f"{account_region}.api.riotgames.com",
         f"/lol/match/v5/matches/by-puuid/{puuid}/ids{query}",
     )
+
+
+def get_all_ranked_match_ids(
+    client: RiotAPIClient,
+    puuid: str,
+    account_region: str,
+    *,
+    start_time_epoch_s: int | None = None,
+    safety_cap: int,
+) -> list[str]:
+    """Pages through get_match_ids with match_type="ranked" until a page comes back shorter than
+    _MATCH_IDS_PAGE_SIZE (no more matches left) or `safety_cap` total ids have been collected --
+    whichever comes first. Filtering to ranked here (rather than after fetching match detail)
+    means the page budget is never wasted on normals/ARAM that the aggregate pipeline would just
+    discard anyway (see aggregate/personal_stats.py, aggregate/roster_synergy.py -- both already
+    restrict to config.RANKED_QUEUE_IDS)."""
+    all_ids: list[str] = []
+    start = 0
+    while len(all_ids) < safety_cap:
+        page = get_match_ids(
+            client, puuid, account_region,
+            start=start, count=_MATCH_IDS_PAGE_SIZE,
+            start_time_epoch_s=start_time_epoch_s, match_type="ranked",
+        )
+        all_ids.extend(page)
+        if len(page) < _MATCH_IDS_PAGE_SIZE:
+            break
+        start += _MATCH_IDS_PAGE_SIZE
+    return all_ids[:safety_cap]
 
 
 def get_match(client: RiotAPIClient, match_id: str, account_region: str) -> dict:

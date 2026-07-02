@@ -30,7 +30,12 @@ ORACLES_ELIXIR_CSV_URL = os.environ.get("ORACLES_ELIXIR_CSV_URL", "")
 # Ranked queues treated as "Ranked 5s-relevant" for personal aggregate stats.
 RANKED_QUEUE_IDS = (420, 440)  # 420 = Solo/Duo, 440 = Flex
 
-INITIAL_BACKFILL_MAX_MATCHES = 50
+# Upper bound on how many ranked match ids a single refresh will ever page through for one
+# player (first-time backfill or incremental). This is a defensive ceiling against a
+# pathological account, NOT the intended limiting factor -- match fetching pages through
+# Match-V5 with type=ranked until Riot returns a short page (no more matches), and this cap is
+# far larger than any realistic season's ranked game count, so it should never actually bind.
+MATCH_HISTORY_SAFETY_CAP = 1000
 
 VALID_ROLES = ("TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT")
 VALID_ACCOUNT_REGIONS = ("americas", "asia", "europe")

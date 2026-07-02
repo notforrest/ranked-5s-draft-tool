@@ -138,8 +138,11 @@ def _refresh_one_player(conn, client: RiotAPIClient, player: dict) -> dict:
 
 
 def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str) -> dict:
-    """Incrementally fetches new matches since this player's stored watermark (or, for a
-    first-time player with no watermark, backfills up to config.INITIAL_BACKFILL_MAX_MATCHES).
+    """Fetches ranked match ids since this player's stored watermark (or, for a first-time
+    player with no watermark, the player's full ranked history up to
+    config.MATCH_HISTORY_SAFETY_CAP) via endpoints.get_all_ranked_match_ids, which pages through
+    Match-V5 with type=ranked rather than a single fixed-size window -- a first-time backfill no
+    longer risks non-ranked games crowding ranked ones out of a small window.
 
     Writes each new match's raw JSON to disk, its metadata to `matches`, and inserts a
     match_participants row ONLY for participants whose puuid belongs to our roster -- looked up
@@ -151,14 +154,11 @@ def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str
     refresh_state = match_repo.get_refresh_state(conn, player_id)
     watermark_ms = refresh_state["last_match_fetched_ms"] if refresh_state else None
 
-    if watermark_ms is not None:
-        match_ids = endpoints.get_match_ids(
-            client, puuid, account_region, start_time_epoch_s=watermark_ms // 1000,
-        )
-    else:
-        match_ids = endpoints.get_match_ids(
-            client, puuid, account_region, count=config.INITIAL_BACKFILL_MAX_MATCHES,
-        )
+    match_ids = endpoints.get_all_ranked_match_ids(
+        client, puuid, account_region,
+        start_time_epoch_s=(watermark_ms // 1000) if watermark_ms is not None else None,
+        safety_cap=config.MATCH_HISTORY_SAFETY_CAP,
+    )
 
     roster_by_puuid = {p["puuid"]: p["player_id"] for p in roster_repo.get_active_players(conn) if p["puuid"]}
 
