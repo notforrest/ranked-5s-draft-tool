@@ -42,8 +42,7 @@ const state = {
   refreshOutcomeSeen: false,
 
   draftSessionId: null,
-  draft: null,            // last full payload from create/get/enter/amend
-  amendTargetSlot: null,  // slot currently open in the amend popover, or null
+  draft: null,            // last full payload from create/get/enter/undo
 };
 
 /* ============================================================
@@ -119,6 +118,7 @@ function wireStaticHandlers() {
   document.getElementById("refresh-btn").addEventListener("click", onRefreshClicked);
   document.getElementById("start-draft-btn").addEventListener("click", onStartDraftClicked);
   document.getElementById("new-draft-btn").addEventListener("click", onNewDraftClicked);
+  document.getElementById("undo-btn").addEventListener("click", onUndoClicked);
   document.getElementById("fetch-tierlist-btn").addEventListener("click", onFetchTierListClicked);
   document.getElementById("fetch-oe-btn").addEventListener("click", onFetchOracleElixirClicked);
   document.getElementById("oe-upload-input").addEventListener("change", onOracleElixirFileSelected);
@@ -133,11 +133,6 @@ function wireStaticHandlers() {
   document.getElementById("champ-search").addEventListener("input", (e) => {
     renderChampGrid(e.target.value);
   });
-
-  document.getElementById("amend-search").addEventListener("input", (e) => {
-    renderAmendGrid(e.target.value);
-  });
-  document.getElementById("amend-popover-close").addEventListener("click", closeAmendPopover);
 
   // Hovering INTO the detail panel itself (e.g. to read a long section) must not immediately
   // flicker-close it -- same close-grace-period mechanism as leaving a hoverable card.
@@ -487,7 +482,8 @@ function renderDraft() {
   // always close it here rather than risk a panel left pointing at nothing.
   closeChampionDetailPanel();
   renderStepBanner();
-  renderInvalidatedBanner();
+  hideDraftErrorBanner();
+  document.getElementById("undo-btn").disabled = state.draft.current_slot === 0;
   renderBoard();
   renderChampGrid(document.getElementById("champ-search").value);
   renderSuggestions();
@@ -537,28 +533,14 @@ function renderStepBanner() {
   }
 }
 
-function renderInvalidatedBanner() {
-  const el = document.getElementById("invalidated-banner");
-  const invalidated = state.draft.newly_invalidated_slots;
-  if (!invalidated || invalidated.length === 0) {
-    el.hidden = true;
-    return;
-  }
+function hideDraftErrorBanner() {
+  document.getElementById("draft-error-banner").hidden = true;
+}
+
+function showDraftErrorBanner(message) {
+  const el = document.getElementById("draft-error-banner");
   el.hidden = false;
-  el.innerHTML = "";
-  const msg = document.createElement("span");
-  const slotWord = invalidated.length === 1 ? "slot" : "slots";
-  msg.textContent =
-    `This change also invalidated your entry at ${slotWord} ${invalidated.join(", ")} ` +
-    "-- please review and fix.";
-  const dismiss = document.createElement("button");
-  dismiss.className = "btn btn-secondary btn-small";
-  dismiss.textContent = "Dismiss";
-  dismiss.addEventListener("click", () => {
-    el.hidden = true;
-  });
-  el.appendChild(msg);
-  el.appendChild(dismiss);
+  el.textContent = message;
 }
 
 function renderBoard() {
@@ -597,12 +579,6 @@ function renderBoardRow(containerId, slotEntries, currentSlot) {
       nameTag.className = "slot-champ-name";
       nameTag.textContent = champName(entry.champion_id);
       cell.appendChild(nameTag);
-      cell.addEventListener("click", (evt) => {
-        // The role-badge select handles its own clicks; don't also open the amend popover
-        // when the click originated there.
-        if (evt.target.closest(".role-badge-select")) return;
-        openAmendPopover(entry.slot, evt.currentTarget);
-      });
       if (entry.action === "PICK" && state.draft.our_side && entry.side === state.draft.our_side) {
         cell.appendChild(buildRoleBadge(entry));
       }
@@ -610,7 +586,6 @@ function renderBoardRow(containerId, slotEntries, currentSlot) {
       cell.classList.add("empty");
     }
     if (entry.slot === currentSlot) cell.classList.add("current-slot");
-    if (entry.invalidated) cell.classList.add("invalidated");
     el.appendChild(cell);
   }
 }
@@ -702,7 +677,6 @@ function renderChampGrid(filterText) {
 }
 
 async function onChampionClicked(championId) {
-  const errBanner = document.getElementById("invalidated-banner");
   try {
     const result = await api("POST", `/api/draft/${state.draftSessionId}/enter`, {
       champion_id: championId,
@@ -710,9 +684,7 @@ async function onChampionClicked(championId) {
     state.draft = result;
     renderDraft();
   } catch (e) {
-    errBanner.hidden = false;
-    errBanner.innerHTML = "";
-    errBanner.appendChild(document.createTextNode(`Could not enter pick/ban: ${e.message}`));
+    showDraftErrorBanner(`Could not enter pick/ban: ${e.message}`);
   }
 }
 
@@ -943,11 +915,10 @@ function positionChampionDetailPanel(anchorEl) {
   const panel = document.getElementById("champion-detail-panel");
   const rect = anchorEl.getBoundingClientRect();
   const panelWidth = 340;
-  let left = rect.right + 12; // open to the RIGHT of the suggestion row by default --
-                                // the suggestions list scrolls, so (unlike the amend popover,
-                                // which always opens below a small fixed-position board cell)
-                                // a below-anchored panel near the bottom of the viewport would
-                                // risk running off-screen; side-anchoring avoids that.
+  let left = rect.right + 12; // open to the RIGHT of the anchor by default -- the suggestions
+                                // list and champ grid both scroll, so a below-anchored panel
+                                // near the bottom of the viewport would risk running off-screen;
+                                // side-anchoring avoids that.
   if (left + panelWidth > window.innerWidth - 10) {
     left = rect.left - panelWidth - 12; // flip to the LEFT if that would overflow
   }
@@ -1120,110 +1091,18 @@ function renderCdpThreat(threat) {
 }
 
 /* ============================================================
-   "Fix a previous slot" (amend) popover
+   Undo
    ============================================================ */
-function openAmendPopover(slot, anchorEl) {
-  state.amendTargetSlot = slot;
-
-  const popover = document.getElementById("amend-popover");
-  const titleEl = document.getElementById("amend-popover-title");
-  const entry = (state.draft.entries || []).find((e) => e && e.slot === slot);
-  const currentName = entry && entry.champion_id !== null ? champName(entry.champion_id) : "(empty)";
-  titleEl.textContent = `Fix slot ${slot} (currently ${currentName})`;
-
-  document.getElementById("amend-search").value = "";
-  renderAmendGrid("");
-
-  popover.hidden = false;
-  const rect = anchorEl.getBoundingClientRect();
-  const popoverWidth = 320;
-  let left = rect.left;
-  if (left + popoverWidth > window.innerWidth - 10) {
-    left = window.innerWidth - popoverWidth - 10;
-  }
-  popover.style.left = `${Math.max(10, left)}px`;
-  popover.style.top = `${rect.bottom + 8 + window.scrollY}px`;
-}
-
-function closeAmendPopover() {
-  state.amendTargetSlot = null;
-  document.getElementById("amend-popover").hidden = true;
-}
-
-function championIdsUsedBeforeSlot(slot) {
-  // Only slots STRICTLY BEFORE `slot` -- matches the backend's amend() rule (state.py):
-  // colliding with an earlier-filled slot is a hard reject, but colliding with a LATER-filled
-  // slot is allowed (the later slot gets flagged `invalidated` instead) so that fixing a
-  // two-slot swap doesn't deadlock -- you fix the earlier slot first, which frees the later one
-  // up to be corrected next. If this popover disabled every already-used champion regardless of
-  // slot position, that later-slot path would be unreachable from the UI even though the
-  // backend fully supports it.
-  const used = new Set();
-  for (const entry of state.draft.entries || []) {
-    if (entry && entry.slot < slot && entry.champion_id !== null && entry.champion_id !== undefined) {
-      used.add(entry.champion_id);
-    }
-  }
-  return used;
-}
-
-function renderAmendGrid(filterText) {
-  const el = document.getElementById("amend-grid");
-  el.innerHTML = "";
-  if (state.amendTargetSlot === null) return;
-
-  const usedBefore = championIdsUsedBeforeSlot(state.amendTargetSlot);
-
-  const needle = (filterText || "").trim().toLowerCase();
-  const list = state.champions.filter((c) => !needle || c.name.toLowerCase().includes(needle));
-
-  for (const champ of list) {
-    // Disabled only if used at an EARLIER slot -- a champion used at a later slot (or unused,
-    // or the slot's own current value) is selectable; see championIdsUsedBeforeSlot above.
-    const isUsedElsewhere = usedBefore.has(champ.champion_id);
-
-    const cell = document.createElement("div");
-    cell.className = "champ-cell";
-    if (isUsedElsewhere) cell.classList.add("disabled");
-
-    const img = document.createElement("img");
-    img.src = champ.icon_path;
-    img.alt = champ.name;
-    img.loading = "lazy";
-    cell.appendChild(img);
-
-    const nameTag = document.createElement("div");
-    nameTag.className = "champ-name";
-    nameTag.textContent = champ.name;
-    cell.appendChild(nameTag);
-
-    if (!isUsedElsewhere) {
-      cell.addEventListener("click", () => onAmendChampionClicked(champ.champion_id));
-    }
-    el.appendChild(cell);
-  }
-}
-
-async function onAmendChampionClicked(championId) {
-  const slot = state.amendTargetSlot;
-  if (slot === null) return;
-
+async function onUndoClicked() {
   try {
-    const result = await api("POST", `/api/draft/${state.draftSessionId}/amend`, {
-      slot,
-      champion_id: championId,
-    });
+    const result = await api("POST", `/api/draft/${state.draftSessionId}/undo`, undefined);
     state.draft = result;
-    // Unlike enter(), amend() doesn't advance current_slot -- the detail cache's key includes
-    // current_slot for cheap free invalidation on every real pick/ban, but an amend to an
-    // EARLIER slot can change our_picks_so_far()/their_picks_so_far() (affecting synergy/threat
-    // data) without that key changing. Amends are rare and deliberate, so a full cache-bust
-    // here is cheap insurance rather than building a more surgical partial-invalidation scheme.
+    // current_slot moves backward, so the detail-cache key (which includes current_slot)
+    // naturally stops matching old entries -- cleared anyway as cheap insurance, same
+    // rationale this codebase already applies to other rare/deliberate corrections.
     hoverController.cache.clear();
-    closeAmendPopover();
     renderDraft();
   } catch (e) {
-    const titleEl = document.getElementById("amend-popover-title");
-    titleEl.textContent = `Error: ${e.message}`;
+    showDraftErrorBanner(`Could not undo: ${e.message}`);
   }
 }

@@ -88,7 +88,7 @@
     <span id="step-banner-text">Loading draft&hellip;</span>
   </div>
 
-  <div id="invalidated-banner" class="invalidated-banner" hidden></div>
+  <div id="draft-error-banner" class="draft-error-banner" hidden></div>
 
   <div class="draft-layout">
 
@@ -133,21 +133,12 @@
   </div>
 
   <div class="draft-footer">
+    <button id="undo-btn" class="btn btn-secondary" disabled>Undo</button>
     <button id="new-draft-btn" class="btn btn-secondary">New Draft</button>
   </div>
 </section>
 
-<!-- Inline "fix a slot" popover (shared, repositioned via JS) -->
-<div id="amend-popover" class="amend-popover" hidden>
-  <div class="amend-popover-header">
-    <span id="amend-popover-title">Fix this slot</span>
-    <button id="amend-popover-close" class="amend-popover-close">&times;</button>
-  </div>
-  <input type="text" id="amend-search" class="champ-search" placeholder="Search champions&hellip;">
-  <div class="champ-grid champ-grid-small" id="amend-grid"></div>
-</div>
-
-<!-- Champion detail hover panel (shared, repositioned via JS, reuses amend-popover's anchor pattern) -->
+<!-- Champion detail hover panel (shared, repositioned via JS) -->
 <div id="champion-detail-panel" class="champion-detail-panel" hidden>
   <div class="champion-detail-header">
     <img id="cdp-icon" class="cdp-icon" alt="">

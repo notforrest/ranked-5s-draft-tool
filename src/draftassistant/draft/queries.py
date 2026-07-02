@@ -71,10 +71,8 @@ def their_bans_so_far(state: DraftState) -> list[int]:
 
 
 def available_champions(state: DraftState, all_champion_ids: list[int]) -> list[int]:
-    """`all_champion_ids` minus every champion currently occupying any (non-None) slot --
-    including slots flagged `invalidated`. The champion identity was still "used" from a
-    legality standpoint (enter()/amend() would reject re-picking it) even though the entry
-    is flagged for the driver to review, so it must stay excluded from availability."""
+    """`all_champion_ids` minus every champion currently occupying any (non-None) slot -- enter()
+    would reject re-picking any of them, so they must stay excluded from availability."""
     used = {entry.champion_id for entry in state.entries if entry is not None}
     return [cid for cid in all_champion_ids if cid not in used]
 

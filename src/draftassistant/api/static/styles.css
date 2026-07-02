@@ -224,7 +224,7 @@ button { font-family: var(--font); cursor: pointer; }
 .step-banner.our-turn .turn-tag { background: var(--green); color: #062910; }
 .step-banner:not(.our-turn) .turn-tag { background: var(--gray); color: #fff; }
 
-.invalidated-banner {
+.draft-error-banner {
   background: #3a2c0f;
   border: 1px solid var(--amber);
   color: #ffe1a8;
@@ -232,10 +232,6 @@ button { font-family: var(--font); cursor: pointer; }
   padding: 12px 16px;
   margin-bottom: 12px;
   font-size: 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
 }
 
 .draft-layout {
@@ -282,30 +278,11 @@ button { font-family: var(--font); cursor: pointer; }
   overflow: hidden;
   cursor: default;
 }
-.slot-cell.filled { cursor: pointer; }
-.slot-cell.filled:hover { outline: 2px solid var(--amber); outline-offset: 1px; }
 .slot-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .slot-cell.empty::after {
   content: '';
 }
 .slot-cell.current-slot { outline: 3px solid var(--green); outline-offset: 1px; }
-.slot-cell.invalidated { outline: 3px solid var(--red); outline-offset: 1px; }
-.slot-cell.invalidated::before {
-  content: '!';
-  position: absolute;
-  top: -2px;
-  right: 0;
-  background: var(--red);
-  color: #fff;
-  font-weight: 800;
-  font-size: 12px;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
-  text-align: center;
-  border-radius: 0 0 0 6px;
-  z-index: 2;
-}
 .slot-cell .slot-champ-name {
   position: absolute;
   bottom: 0;
@@ -364,7 +341,6 @@ button { font-family: var(--font); cursor: pointer; }
   max-height: 520px;
   overflow-y: auto;
 }
-.champ-grid-small { max-height: 320px; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); }
 
 .champ-cell {
   position: relative;
@@ -428,38 +404,7 @@ button { font-family: var(--font); cursor: pointer; }
 
 .draft-complete-msg { color: var(--text-dim); text-align: center; padding: 20px; }
 
-.draft-footer { margin-top: 16px; display: flex; justify-content: flex-end; }
-
-/* ============================================================
-   Amend popover
-   ============================================================ */
-.amend-popover {
-  position: fixed;
-  z-index: 100;
-  width: 320px;
-  background: var(--bg-panel);
-  border: 1px solid var(--amber);
-  border-radius: var(--radius);
-  padding: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-}
-.amend-popover[hidden] { display: none; }
-.amend-popover-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  font-weight: 700;
-}
-.amend-popover-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 18px;
-  line-height: 1;
-  padding: 0 4px;
-}
-.amend-popover-close:hover { color: var(--text); }
+.draft-footer { margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; }
 
 /* ============================================================
    Champion detail hover panel

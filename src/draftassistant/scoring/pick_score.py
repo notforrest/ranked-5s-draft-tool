@@ -1,6 +1,6 @@
 """Pick-suggestion scoring.
 
-Scope note: this is a single-ply heuristic scorer, re-run fresh after every `enter`/`amend`
+Scope note: this is a single-ply heuristic scorer, re-run fresh after every `enter`/`undo`
 against the DraftState. It is NOT a game-theoretic search over the remaining draft tree --
 it never looks ahead at what the opponent might do beyond the static `pick_safety` exposure
 signal below. A future minimax/MCTS layer could plug this in as its leaf evaluator, but that

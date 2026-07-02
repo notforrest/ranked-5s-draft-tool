@@ -1,7 +1,7 @@
 """Ban-suggestion scoring.
 
 Scope note (same as pick_score.py): this is a single-ply heuristic scorer, re-run fresh after
-every `enter`/`amend`, NOT a game-theoretic search over the remaining draft tree. It reasons
+every `enter`/`undo`, NOT a game-theoretic search over the remaining draft tree. It reasons
 about "what threatens us right now" (comfort-pool counters) and "what's dangerous in the
 abstract" (global win/pick rate, enemy role flexibility, enemy's already-declared synergy
 direction) -- it never simulates multiple future ban/pick exchanges. A minimax/MCTS layer

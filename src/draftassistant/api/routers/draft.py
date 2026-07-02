@@ -87,16 +87,13 @@ def _serialize_entries(state: DraftState, conn: sqlite3.Connection) -> list[dict
             "action": slot_def.action,
         }
         if entry is None:
-            out.append({**base, "champion_id": None, "invalidated": False, "amended_count": 0,
-                        "resolved_role": None, "is_role_override": False})
+            out.append({**base, "champion_id": None, "resolved_role": None, "is_role_override": False})
         else:
             out.append(
                 {
                     **base,
                     "champion_id": entry.champion_id,
                     "entered_at": entry.entered_at,
-                    "amended_count": entry.amended_count,
-                    "invalidated": entry.invalidated,
                     "resolved_role": resolved_roles.get(slot_def.slot),
                     "is_role_override": entry.role_override is not None,
                 }
@@ -105,9 +102,9 @@ def _serialize_entries(state: DraftState, conn: sqlite3.Connection) -> list[dict
 
 
 def _get_suggestions(conn: sqlite3.Connection, state: DraftState) -> dict:
-    """Shared by the dedicated suggestions endpoint AND internally by enter/amend, so a
-    single round-trip to enter/amend a champion also returns fresh suggestions -- the
-    frontend never needs to make a second call just to refresh the suggestion panel."""
+    """Shared by the dedicated suggestions endpoint AND internally by enter/undo, so a
+    single round-trip also returns fresh suggestions -- the frontend never needs to make a
+    second call just to refresh the suggestion panel."""
     if queries.is_draft_complete(state):
         return {"draft_complete": True, "suggestions": []}
 
@@ -199,28 +196,20 @@ def enter_pick(draft_session_id: int, body: EnterRequest,
 
 
 # ---------------------------------------------------------------------------
-# POST /api/draft/{draft_session_id}/amend
+# POST /api/draft/{draft_session_id}/undo
 # ---------------------------------------------------------------------------
-class AmendRequest(BaseModel):
-    slot: int
-    champion_id: int
-
-
-@router.post("/draft/{draft_session_id}/amend")
-def amend_pick(draft_session_id: int, body: AmendRequest,
-                conn: sqlite3.Connection = Depends(get_db)) -> dict:
+@router.post("/draft/{draft_session_id}/undo")
+def undo_last(draft_session_id: int, conn: sqlite3.Connection = Depends(get_db)) -> dict:
     state = _load_state(conn, draft_session_id)
     try:
-        newly_invalidated = state.amend(body.slot, body.champion_id)
+        # No body -- always reverts state's own current_slot - 1, mirroring how /enter's slot
+        # is implicit too.
+        state.undo_last()
     except DraftValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     _save_state(conn, draft_session_id, state)
-    payload = _state_payload(conn, draft_session_id, state)
-    # Surfaced as a top-level field (not buried in `entries`) precisely because the caller
-    # is instructed to make this loud in the UI -- "this also invalidated slot X."
-    payload["newly_invalidated_slots"] = newly_invalidated
-    return payload
+    return _state_payload(conn, draft_session_id, state)
 
 
 # ---------------------------------------------------------------------------
