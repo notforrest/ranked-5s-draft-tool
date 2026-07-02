@@ -97,3 +97,10 @@ Open `http://127.0.0.1:8731/` in a browser. Pick your 5 for tonight, assign role
 side, and start the draft. Click champions in the grid as bans/picks happen in your real client
 -- the tool infers whose turn it is automatically. Click any already-filled slot on the board to
 correct a misclick.
+
+Each of your picks on the board shows a role badge (auto-detected from role-eligibility data, or
+"Unknown" if none exists yet) -- click it to override the guess from a dropdown, which
+immediately updates which roles "Pick Suggestions" still considers open. Hover any row in
+"Pick Suggestions"/"Ban Suggestions" for a detail panel with real win/pick/ban rate, which of
+your teammates have mastery or personal history on that champion, and its synergy with your
+current picks (or threat to your team's comfort picks, when banning).
