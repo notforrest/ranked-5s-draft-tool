@@ -111,13 +111,15 @@ button { font-family: var(--font); cursor: pointer; }
 .roster-row .player-meta { color: var(--text-dim); font-size: 12px; }
 
 .roster-row .role-label {
-  flex: 0 0 90px;
+  flex: 0 0 64px;
   font-weight: 600;
   letter-spacing: 0.03em;
 }
 
 .roster-row select {
   flex: 1;
+  min-width: 0;   /* selects don't shrink below their content's width by default in flexbox --
+                     without this the longest option ("Alex (AlexPlays#NA1)") forces an overflow */
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
