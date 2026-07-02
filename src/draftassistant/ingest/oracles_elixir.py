@@ -64,14 +64,17 @@ def import_csv(conn, csv_path: Path) -> dict:
     returned in the summary so the CLI can report how many rows need alias-map attention.
     """
     csv_path = Path(csv_path)
+    logger.info("Reading %s...", csv_path)
     df = pd.read_csv(csv_path, low_memory=False)
+    logger.info("Loaded %d row(s). Filtering to datacompleteness == 'complete'...", len(df))
     df = df[df["datacompleteness"] == "complete"]
 
     player_rows = df[df["position"] != "team"]
+    logger.info("%d complete player-row(s) to resolve and import.", len(player_rows))
 
     unresolved: list[str] = []
     row_dicts: list[dict] = []
-    for _, row in player_rows.iterrows():
+    for i, (_, row) in enumerate(player_rows.iterrows()):
         champion_name_raw = row.get("champion")
         champion_id = _resolve_champion_id(conn, champion_name_raw)
         if champion_id is None:
@@ -105,14 +108,21 @@ def import_csv(conn, csv_path: Path) -> dict:
             "source_file": csv_path.name,
         })
 
+        if (i + 1) % 2000 == 0 or (i + 1) == len(player_rows):
+            logger.info("  ...%d/%d rows resolved (%d unresolved so far)", i + 1, len(player_rows), len(unresolved))
+
     # sqlite3 can't bind numpy/pandas scalar types directly for some dtypes (e.g. numpy.int64) --
     # normalize every value to a plain Python type before handing rows to the repo layer.
     row_dicts = [{k: _to_plain(v) for k, v in r.items()} for r in row_dicts]
 
+    logger.info("Upserting %d row(s) into oe_games_raw...", len(row_dicts))
     rows_upserted = oe_repo.upsert_rows(conn, row_dicts) if row_dicts else 0
 
+    logger.info("Recomputing pro synergy...")
     recompute_pro_synergy(conn)
+    logger.info("Recomputing pro matchup...")
     recompute_pro_matchup(conn)
+    logger.info("Recomputing pro role eligibility...")
     recompute_pro_role_eligibility(conn)
 
     games_count = player_rows["gameid"].nunique() if not player_rows.empty else 0

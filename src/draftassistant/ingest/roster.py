@@ -62,8 +62,10 @@ def import_roster_file(conn, yaml_path: Path) -> dict:
     afterward, or splitting them across two runs, resolves that).
     """
     yaml_path = Path(yaml_path)
+    logger.info("Reading roster file %s...", yaml_path)
     data = yaml.safe_load(yaml_path.read_text()) or {}
     entries = data.get("players") or []
+    logger.info("Found %d entr%s to process.", len(entries), "y" if len(entries) == 1 else "ies")
 
     existing_by_riot_id: dict[tuple[str, str], dict] = {}
     existing_by_name: dict[str, list[dict]] = {}
@@ -74,8 +76,9 @@ def import_roster_file(conn, yaml_path: Path) -> dict:
     skipped: list[str] = []
     renamed: list[str] = []
     imported = 0
-    for entry in entries:
+    for i, entry in enumerate(entries):
         display_name = entry.get("display_name")
+        logger.info("[%d/%d] processing %r...", i + 1, len(entries), display_name or entry.get("riot_game_name"))
         riot_game_name = entry.get("riot_game_name")
         tag_line = entry.get("tag_line")
         label = display_name or riot_game_name or "(unnamed entry)"
@@ -109,6 +112,8 @@ def import_roster_file(conn, yaml_path: Path) -> dict:
                 renamed.append(
                     f"{display_name}: {old['riot_game_name']}#{old['riot_tag_line']} -> {riot_game_name}#{tag_line}"
                 )
+                logger.info("  -> detected Riot ID rename: %s#%s -> %s#%s",
+                            old["riot_game_name"], old["riot_tag_line"], riot_game_name, tag_line)
                 # Consumed -- later entries in this same file can't also match this identity.
                 existing_by_name[display_name.lower()].remove(old)
                 del existing_by_riot_id[(old["riot_game_name"], old["riot_tag_line"])]
@@ -131,6 +136,7 @@ def import_roster_file(conn, yaml_path: Path) -> dict:
             account_region=account_region,
             preferred_roles=preferred_roles,
         )
+        logger.info("  -> upserted.")
         imported += 1
 
     return {

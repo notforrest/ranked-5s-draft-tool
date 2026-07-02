@@ -8,12 +8,15 @@ isolation without needing to also mock away sleeps/retries.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import httpx
 
 from draftassistant.riot_client.exceptions import RiotAuthError, RiotNotFoundError, RiotRateLimitError
 from draftassistant.riot_client.rate_limiter import AppRateLimiter
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT_S = 10.0
 
@@ -36,8 +39,10 @@ class RiotAPIClient:
         if cache_key is not None:
             cached = self._read_cache(cache_key)
             if cached is not None:
+                logger.info("  (cached) %s", path)
                 return cached
 
+        logger.info("  GET %s", path)
         self._limiter.acquire()
         resp = httpx.get(
             f"https://{host}{path}",

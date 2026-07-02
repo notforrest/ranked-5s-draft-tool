@@ -7,11 +7,14 @@ RiotAPIClient involved -- just plain httpx calls.
 from __future__ import annotations
 
 import json
+import logging
 
 import httpx
 
 from draftassistant import config
 from draftassistant.db.repositories import champion_repo
+
+logger = logging.getLogger(__name__)
 
 _BASE = "https://ddragon.leagueoflegends.com"
 _TIMEOUT_S = 10.0
@@ -19,6 +22,7 @@ _TIMEOUT_S = 10.0
 
 def get_latest_version() -> str:
     """Returns the current live patch's DDragon version string, e.g. "14.13.1"."""
+    logger.info("  GET %s/api/versions.json", _BASE)
     resp = httpx.get(f"{_BASE}/api/versions.json", timeout=_TIMEOUT_S)
     resp.raise_for_status()
     versions = resp.json()
@@ -38,9 +42,11 @@ def sync_champions(conn) -> dict:
     manager do so), keeping this function's side effects limited to the connection it was given.
     """
     version = get_latest_version()
+    logger.info("Latest DDragon version: %s", version)
     data = _get_champion_json(version)
 
     champions_data = data["data"]
+    logger.info("Upserting %d champion(s)...", len(champions_data))
     for entry in champions_data.values():
         champion_repo.upsert_champion(
             conn,
@@ -58,8 +64,10 @@ def sync_champions(conn) -> dict:
 def _get_champion_json(version: str) -> dict:
     cache_path = config.DDRAGON_CACHE_DIR / f"champion_{version}.json"
     if cache_path.exists():
+        logger.info("  using cached champion.json for %s", version)
         return json.loads(cache_path.read_text())
 
+    logger.info("  GET %s/cdn/%s/data/en_US/champion.json", _BASE, version)
     resp = httpx.get(f"{_BASE}/cdn/{version}/data/en_US/champion.json", timeout=_TIMEOUT_S)
     resp.raise_for_status()
     data = resp.json()

@@ -4,6 +4,7 @@ in .env. This is the ONLY script that ever calls the Riot API -- run it before q
 during a live draft."""
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from draftassistant.db import connection  # noqa: E402
 from draftassistant.refresh import pre_draft_refresh  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def main() -> None:

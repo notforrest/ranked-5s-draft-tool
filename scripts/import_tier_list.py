@@ -8,6 +8,7 @@ Usage:
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -15,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from draftassistant.db import connection  # noqa: E402
 from draftassistant.ingest import tier_list  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def main() -> None:
@@ -38,9 +41,12 @@ def main() -> None:
         print(f"No *.yaml files found in {target}")
         sys.exit(1)
 
+    print(f"Found {len(yaml_files)} file(s) to import: {[f.name for f in yaml_files]}")
+    print("Connecting to database...")
     conn = connection.get_conn()
     try:
-        for yaml_path in yaml_files:
+        for i, yaml_path in enumerate(yaml_files):
+            print(f"\n[{i + 1}/{len(yaml_files)}] {yaml_path.name}")
             summary = tier_list.import_tier_list_file(conn, yaml_path)
             print(f"{yaml_path.name} (patch {summary['patch']}): imported "
                   f"{summary['entries_imported']}/{summary['entries_processed']} entries")

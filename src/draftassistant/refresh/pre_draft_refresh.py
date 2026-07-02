@@ -39,10 +39,13 @@ def run(conn) -> dict:
     )
 
     players = roster_repo.get_active_players(conn)
+    logger.info("Starting pre-draft refresh for %d active player(s).", len(players))
     player_summaries: list[dict] = []
     fatal_auth_error: str | None = None
 
     for i, player in enumerate(players):
+        logger.info("[%d/%d] %s (%s#%s)", i + 1, len(players),
+                    player["display_name"], player["riot_game_name"], player["riot_tag_line"])
         try:
             summary = _refresh_one_player(conn, client, player)
             player_summaries.append(summary)
@@ -92,6 +95,7 @@ def run(conn) -> dict:
 
     # Feed newly-fetched matches into derived stats immediately, even if the run ended early --
     # whatever we did fetch should still be reflected.
+    logger.info("Recomputing personal stats and roster synergy...")
     recompute_personal_stats(conn)
     recompute_roster_synergy(conn)
 
@@ -101,6 +105,8 @@ def run(conn) -> dict:
         status = "partial"
     else:
         status = "success"
+
+    logger.info("Refresh run #%d finished: %s", run_id, status)
 
     summary = {
         "run_id": run_id,
@@ -117,13 +123,17 @@ def _refresh_one_player(conn, client: RiotAPIClient, player: dict) -> dict:
 
     puuid = player["puuid"]
     if not puuid:
+        logger.info("  resolving puuid for Riot ID %s#%s...", player["riot_game_name"], player["riot_tag_line"])
         puuid = endpoints.resolve_puuid(
             client, player["riot_game_name"], player["riot_tag_line"], player["account_region"],
         )
         roster_repo.set_puuid(conn, player_id, puuid)
+        logger.info("  resolved puuid.")
 
+    logger.info("  fetching champion mastery...")
     mastery_entries = endpoints.get_champion_mastery(client, puuid, player["platform_region"])
     mastery_repo.replace_player_mastery(conn, player_id, mastery_entries)
+    logger.info("  fetched mastery for %d champion(s).", len(mastery_entries))
 
     match_summary = _refresh_match_history(conn, client, player, puuid)
 
@@ -154,6 +164,12 @@ def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str
     refresh_state = match_repo.get_refresh_state(conn, player_id)
     watermark_ms = refresh_state["last_match_fetched_ms"] if refresh_state else None
 
+    if watermark_ms is None:
+        logger.info("  no watermark yet -- backfilling full ranked history (up to %d matches)...",
+                    config.MATCH_HISTORY_SAFETY_CAP)
+    else:
+        logger.info("  fetching ranked matches since watermark %d...", watermark_ms)
+
     match_ids = endpoints.get_all_ranked_match_ids(
         client, puuid, account_region,
         start_time_epoch_s=(watermark_ms // 1000) if watermark_ms is not None else None,
@@ -162,12 +178,17 @@ def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str
 
     roster_by_puuid = {p["puuid"]: p["player_id"] for p in roster_repo.get_active_players(conn) if p["puuid"]}
 
+    to_fetch = [m for m in match_ids if not match_repo.match_exists(conn, m)]
+    logger.info("  %d ranked match id(s) seen, %d already cached, %d new to fetch.",
+                len(match_ids), len(match_ids) - len(to_fetch), len(to_fetch))
+
     new_matches = 0
     max_creation_seen = watermark_ms
     for match_id in match_ids:
         if match_repo.match_exists(conn, match_id):
             continue
 
+        logger.info("  fetching match detail (%d/%d): %s", new_matches + 1, len(to_fetch), match_id)
         match_data = endpoints.get_match(client, match_id, account_region)
         info = match_data["info"]
 
@@ -214,6 +235,7 @@ def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str
     match_repo.upsert_refresh_state(
         conn, player_id, last_match_fetched_ms=max_creation_seen, status="ok",
     )
+    logger.info("  done: %d new match(es) fetched, watermark now %s.", new_matches, max_creation_seen)
 
     return {"new_matches_fetched": new_matches, "match_ids_seen": len(match_ids)}
 

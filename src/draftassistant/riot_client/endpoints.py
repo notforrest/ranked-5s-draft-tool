@@ -8,10 +8,13 @@ fatal for the whole run when it happens on the first player.
 """
 from __future__ import annotations
 
+import logging
 import time
 
 from draftassistant.riot_client.client import RiotAPIClient
 from draftassistant.riot_client.exceptions import RiotRateLimitError
+
+logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 5
 
@@ -28,6 +31,8 @@ def _get_with_retry(client: RiotAPIClient, host: str, path: str, *, cache_key: s
         except RiotRateLimitError as e:
             if attempt >= _MAX_ATTEMPTS:
                 raise
+            logger.info("  rate limited, waiting %.1fs (attempt %d/%d) -- %s",
+                        e.retry_after, attempt, _MAX_ATTEMPTS, path)
             time.sleep(e.retry_after)
 
 
@@ -117,16 +122,22 @@ def get_all_ranked_match_ids(
     restrict to config.RANKED_QUEUE_IDS)."""
     all_ids: list[str] = []
     start = 0
+    page_num = 0
     while len(all_ids) < safety_cap:
+        page_num += 1
         page = get_match_ids(
             client, puuid, account_region,
             start=start, count=_MATCH_IDS_PAGE_SIZE,
             start_time_epoch_s=start_time_epoch_s, match_type="ranked",
         )
         all_ids.extend(page)
+        logger.info("  match-id page %d: %d ranked match(es) (%d total so far)",
+                    page_num, len(page), len(all_ids))
         if len(page) < _MATCH_IDS_PAGE_SIZE:
             break
         start += _MATCH_IDS_PAGE_SIZE
+    if len(all_ids) > safety_cap:
+        logger.info("  hit safety cap of %d matches -- truncating", safety_cap)
     return all_ids[:safety_cap]
 
 

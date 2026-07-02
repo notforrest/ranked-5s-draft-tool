@@ -49,15 +49,17 @@ def import_tier_list_file(conn, yaml_path: Path) -> dict:
     abort the whole file's import.
     """
     yaml_path = Path(yaml_path)
+    logger.info("Reading tier-list file %s...", yaml_path)
     data = yaml.safe_load(yaml_path.read_text())
 
     patch = data.get("patch")
     source_note = data.get("source_note")
     entries = data.get("entries") or []
+    logger.info("Patch %s: importing %d entr%s.", patch, len(entries), "y" if len(entries) == 1 else "ies")
 
     unresolved: list[str] = []
     imported = 0
-    for entry in entries:
+    for i, entry in enumerate(entries):
         champion_name = entry.get("champion")
         champ = champion_repo.get_champion_by_name(conn, champion_name)
         if champ is None:
@@ -79,6 +81,8 @@ def import_tier_list_file(conn, yaml_path: Path) -> dict:
             source_note=source_note,
         )
         imported += 1
+        if (i + 1) % 25 == 0 or (i + 1) == len(entries):
+            logger.info("  ...%d/%d entries processed", i + 1, len(entries))
 
     return {
         "file": str(yaml_path),
@@ -133,16 +137,19 @@ def import_from_opgg(conn, mode: str = "ranked") -> dict:
     role-scoped signal in that branch to derive one from -- the manual role-override feature
     (draft/state.py's set_role_override) is the intended fallback for those champions instead.
     """
+    logger.info("Fetching %s champion stats from OP.GG...", mode)
     payload = opgg_client.fetch_champion_stats(mode=mode)
     patch = _normalize_patch(payload.get("meta", {}).get("version"))
     source_note = f"Auto-fetched from op.gg (unofficial API), meta.version={payload.get('meta', {}).get('version')}"
+    champions_in_payload = payload.get("data") or []
+    logger.info("Fetched patch %s, %d champion(s) in response. Importing...", patch, len(champions_in_payload))
 
     imported = 0
     skipped_unresolved_champion: list[int] = []
     skipped_no_role: list[int] = []
     opgg_eligibility_rows: list[tuple[int, str, int]] = []
 
-    for summary in payload.get("data") or []:
+    for i, summary in enumerate(champions_in_payload):
         champion_id = summary.get("id")
         if champion_repo.get_champion_by_id(conn, champion_id) is None:
             skipped_unresolved_champion.append(champion_id)
@@ -182,16 +189,21 @@ def import_from_opgg(conn, mode: str = "ranked") -> dict:
                 )
                 imported += 1
 
+        if (i + 1) % 25 == 0 or (i + 1) == len(champions_in_payload):
+            logger.info("  ...%d/%d champions processed (%d tier-list entries imported so far)",
+                        i + 1, len(champions_in_payload), imported)
+
     # Always called, even with an empty list -- a run that (this time) sees zero
     # positions-bearing champions correctly wipes any stale "opgg" rows from a previous run,
     # consistent with replace_role_eligibility's documented "wholesale replace per source" contract.
+    logger.info("Recomputing opgg-sourced role eligibility (%d row(s))...", len(opgg_eligibility_rows))
     champion_repo.replace_role_eligibility(conn, "opgg", opgg_eligibility_rows)
 
     return {
         "source": "opgg",
         "mode": mode,
         "patch": patch,
-        "champions_processed": len(payload.get("data") or []),
+        "champions_processed": len(champions_in_payload),
         "entries_imported": imported,
         "champions_skipped_unresolved": skipped_unresolved_champion,
         "champions_skipped_no_known_role": skipped_no_role,

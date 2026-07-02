@@ -6,6 +6,7 @@ Usage: python scripts/import_oracles_elixir.py path/to/oe_data.csv
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -13,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from draftassistant.db import connection  # noqa: E402
 from draftassistant.ingest import oracles_elixir  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def main() -> None:
@@ -25,6 +28,7 @@ def main() -> None:
         print(f"File not found: {csv_path}")
         sys.exit(1)
 
+    print("Connecting to database...")
     conn = connection.get_conn()
     try:
         summary = oracles_elixir.import_csv(conn, csv_path)

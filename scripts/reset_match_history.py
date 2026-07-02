@@ -23,6 +23,7 @@ button) to actually perform the full backfill.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -30,6 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from draftassistant.db import connection  # noqa: E402
 from draftassistant.db.repositories import match_repo, roster_repo  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def _print_roster(conn) -> None:
@@ -70,6 +73,7 @@ def main() -> None:
     group.add_argument("--all", action="store_true", help="reset every active roster player")
     args = parser.parse_args()
 
+    print("Connecting to database...")
     conn = connection.get_conn()
     try:
         if args.list:
@@ -78,6 +82,7 @@ def main() -> None:
 
         if args.all:
             targets = roster_repo.get_active_players(conn)
+            print(f"Resetting watermark for all {len(targets)} active player(s)...")
         else:
             player_id = args.player_id if args.player_id is not None else _resolve_player_id(conn, args.riot_id)
             player = roster_repo.get_player(conn, player_id)
@@ -87,11 +92,13 @@ def main() -> None:
             targets = [player]
 
         reset_count = 0
-        for player in targets:
-            if match_repo.reset_refresh_state(conn, player["player_id"]):
+        for i, player in enumerate(targets):
+            had_watermark = match_repo.reset_refresh_state(conn, player["player_id"])
+            if had_watermark:
                 reset_count += 1
-            print(f"Reset watermark for {player['display_name']} "
-                  f"({player['riot_game_name']}#{player['riot_tag_line']}).")
+            print(f"[{i + 1}/{len(targets)}] {player['display_name']} "
+                  f"({player['riot_game_name']}#{player['riot_tag_line']}): "
+                  f"{'watermark cleared' if had_watermark else 'no watermark to clear'}.")
         conn.commit()
     except Exception:
         conn.rollback()

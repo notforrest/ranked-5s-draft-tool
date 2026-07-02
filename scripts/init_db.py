@@ -4,6 +4,7 @@ refuses to run against an existing one to avoid silently wiping data (delete the
 first if you really want a clean slate)."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import sys
 from pathlib import Path
@@ -12,8 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from draftassistant import config  # noqa: E402
 
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
 
 def main() -> None:
+    print("Ensuring data directories exist...")
     config.ensure_data_dirs()
     schema_path = Path(__file__).resolve().parents[1] / "src" / "draftassistant" / "db" / "schema.sql"
 
@@ -22,7 +26,9 @@ def main() -> None:
         print("Delete it yourself first if you want to start fresh.")
         sys.exit(1)
 
+    print(f"Reading schema from {schema_path}...")
     schema_sql = schema_path.read_text()
+    print(f"Creating database at {config.DB_PATH} and applying schema...")
     conn = sqlite3.connect(config.DB_PATH)
     try:
         conn.executescript(schema_sql)

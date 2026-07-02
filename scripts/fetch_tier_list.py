@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -20,12 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from draftassistant.db import connection  # noqa: E402
 from draftassistant.ingest import tier_list  # noqa: E402
 
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", default="ranked", choices=["ranked", "aram"])
     args = parser.parse_args()
 
+    print("Connecting to database...")
     conn = connection.get_conn()
     try:
         summary = tier_list.import_from_opgg(conn, mode=args.mode)

@@ -14,6 +14,7 @@ your roster.yaml -- this delete only clears the stale row, it doesn't re-import 
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -21,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from draftassistant.db import connection  # noqa: E402
 from draftassistant.db.repositories import roster_repo  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def _print_roster(conn) -> None:
@@ -41,6 +44,7 @@ def main() -> None:
     group.add_argument("--riot-id", help='Riot ID to remove, e.g. "GameName#TagLine"')
     args = parser.parse_args()
 
+    print("Connecting to database...")
     conn = connection.get_conn()
     try:
         if args.list:
@@ -52,6 +56,7 @@ def main() -> None:
                 print('--riot-id must be in "GameName#TagLine" form')
                 sys.exit(1)
             game_name, tag_line = args.riot_id.split("#", 1)
+            print(f"Looking up player with Riot ID {args.riot_id}...")
             player = next(
                 (p for p in roster_repo.get_active_players(conn)
                  if p["riot_game_name"] == game_name and p["riot_tag_line"] == tag_line),
@@ -69,6 +74,7 @@ def main() -> None:
             print(f"No player found with player_id={player_id}")
             sys.exit(1)
 
+        print(f"Deleting player_id={player_id} ({player['display_name']}) and dependent rows...")
         counts = roster_repo.delete_player(conn, player_id)
         conn.commit()
     except Exception:
