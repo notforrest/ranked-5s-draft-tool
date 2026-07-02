@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Resets a player's (or every active player's) refresh watermark so their NEXT "Refresh Data"
-run re-lists their full ranked match history via the new paginated backfill (see
+run re-lists their ranked match history for the CURRENT SEASON via the paginated backfill (see
 riot_client/endpoints.py:get_all_ranked_match_ids), instead of only fetching matches newer than
 whatever the old, queue-agnostic 50-match-window backfill had already advanced past.
 
@@ -9,7 +9,11 @@ code already has a watermark set, so without this reset a future refresh would o
 forward from that point, never going back to pick up ranked games the old narrow window missed
 (the "Draven says 2 games in the tool, 17 on OP.GG" bug). This does NOT delete any already-cached
 match data -- it only clears the watermark; matches already on disk/in the DB are skipped via
-match_exists() during the re-backfill, so re-running refresh afterward is cheap.
+match_exists() during the re-backfill, so re-running refresh afterward is cheap. The backfill
+itself is bounded by config.CURRENT_SEASON_START_DATE (never reaches into a prior season), and
+personal/synergy aggregates independently re-filter to that same season boundary on every
+recompute -- so a stale prior-season match already sitting in the DB from before this bound
+existed is excluded from stats regardless of when it was fetched.
 
 Usage:
   python scripts/reset_match_history.py --list

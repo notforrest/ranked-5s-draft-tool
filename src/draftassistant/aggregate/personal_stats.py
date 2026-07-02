@@ -6,7 +6,8 @@ from __future__ import annotations
 def recompute_personal_stats(conn) -> None:
     """Rebuilds personal_champion_stats (games/wins/last_played_ms per player+champion+role) and
     champion_role_eligibility(source='personal') from match_participants, restricted to ranked
-    queues.
+    queues and the current season (config.CURRENT_SEASON_START_EPOCH_MS) -- a champion's personal
+    win rate/sample size should reflect current form, not carry forward a prior season's games.
 
     match_repo.get_all_roster_participants() already filters to roster players + ranked queues,
     but does not return game_creation_ms (that lives on the `matches` table) -- rather than adding
@@ -23,8 +24,9 @@ def recompute_personal_stats(conn) -> None:
         FROM match_participants mp
         JOIN matches m ON m.match_id = mp.match_id
         WHERE mp.player_id IS NOT NULL AND m.queue_id IN ({placeholders})
+              AND m.game_creation_ms >= ?
         """,
-        config.RANKED_QUEUE_IDS,
+        (*config.RANKED_QUEUE_IDS, config.CURRENT_SEASON_START_EPOCH_MS),
     ).fetchall()
 
     stats: dict[tuple[int, int, str], list[int]] = {}  # (player_id, champion_id, role) -> [games, wins, last_played_ms]

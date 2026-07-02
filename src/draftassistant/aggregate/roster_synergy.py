@@ -10,8 +10,12 @@ from draftassistant.db.repositories import match_repo, synergy_repo
 
 def recompute_roster_synergy(conn) -> None:
     """Rebuilds synergy_roster and matchup_roster from match_participants, restricted to ranked
-    queues (the same roster-participant base dataset personal_stats.py uses)."""
-    rows = match_repo.get_all_roster_participants(conn, config.RANKED_QUEUE_IDS)
+    queues and the current season (the same roster-participant base dataset personal_stats.py
+    uses) -- stale prior-season synergy/matchup data would be just as misleading as stale
+    personal stats."""
+    rows = match_repo.get_all_roster_participants(
+        conn, config.RANKED_QUEUE_IDS, config.CURRENT_SEASON_START_EPOCH_MS,
+    )
 
     _recompute_synergy(conn, rows)
     _recompute_matchup(conn, rows)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,6 +37,20 @@ RANKED_QUEUE_IDS = (420, 440)  # 420 = Solo/Duo, 440 = Flex
 # Match-V5 with type=ranked until Riot returns a short page (no more matches), and this cap is
 # far larger than any realistic season's ranked game count, so it should never actually bind.
 MATCH_HISTORY_SAFETY_CAP = 1000
+
+# Start of the current ranked season/year (YYYY-MM-DD, UTC), used to scope both what gets fetched
+# from Riot (faster refreshes -- no point paging into last season) and what personal/roster
+# aggregates are computed over (correct even for matches already cached locally from before this
+# was added). Riot doesn't expose season boundaries via Match-V5 itself, so -- same pattern as
+# ORACLES_ELIXIR_CSV_URL above -- this is a manually-set value the user bumps once a year, not
+# something the app discovers on its own. Default is Season 2026's start date (per
+# leagueoflegends.com's 2026 ranked announcement); override via .env if you actually want to
+# scope to the current 4-month split instead of the full ranked year (Season 2026 Split 2 started
+# 2026-04-29).
+CURRENT_SEASON_START_DATE = os.environ.get("CURRENT_SEASON_START_DATE", "2026-01-08")
+CURRENT_SEASON_START_EPOCH_MS = int(
+    datetime.strptime(CURRENT_SEASON_START_DATE, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000
+)
 
 VALID_ROLES = ("TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT")
 VALID_ACCOUNT_REGIONS = ("americas", "asia", "europe")

@@ -14,6 +14,12 @@ from draftassistant.riot_client import endpoints
 PUUID = "fake-puuid-0001"
 MATCH_ID = "NA1_9999999999"
 
+_DAY_MS = 24 * 3600 * 1000
+# Timestamps relative to the configured season boundary, not hardcoded epoch values -- so these
+# tests stay correct regardless of what config.CURRENT_SEASON_START_DATE is bumped to later.
+IN_SEASON_MS = config.CURRENT_SEASON_START_EPOCH_MS + 30 * _DAY_MS
+BEFORE_SEASON_MS = config.CURRENT_SEASON_START_EPOCH_MS - 30 * _DAY_MS
+
 
 def _seed_player(conn, *, display_name="TestPlayer", riot_game_name="TestPlayer",
                   riot_tag_line="NA1") -> int:
@@ -57,7 +63,7 @@ def _mock_match_ids_endpoint(puuid=PUUID, match_ids=None):
 
 
 def _match_detail_payload(match_id=MATCH_ID, puuid=PUUID, other_puuid="other-puuid-999",
-                           game_creation_ms=1700000500000, queue_id=420, win=True):
+                           game_creation_ms=IN_SEASON_MS, queue_id=420, win=True):
     return {
         "metadata": {"matchId": match_id},
         "info": {
@@ -150,7 +156,7 @@ def test_full_refresh_happy_path(test_db_conn, tmp_path, monkeypatch):
 
     # refresh_state watermark advanced to the match's gameCreation.
     refresh_state = match_repo.get_refresh_state(test_db_conn, player_id)
-    assert refresh_state["last_match_fetched_ms"] == 1700000500000
+    assert refresh_state["last_match_fetched_ms"] == IN_SEASON_MS
     assert refresh_state["last_refresh_status"] == "ok"
 
     # personal_champion_stats populated by the post-loop aggregate recompute.
@@ -191,7 +197,7 @@ def test_first_time_backfill_pages_through_all_ranked_matches(test_db_conn, tmp_
         for i, match_id in enumerate(match_ids):
             _mock_match_detail_endpoint(
                 match_id=match_id,
-                payload=_match_detail_payload(match_id=match_id, game_creation_ms=1700000000000 + i),
+                payload=_match_detail_payload(match_id=match_id, game_creation_ms=IN_SEASON_MS + i),
             )
 
         summary = pre_draft_refresh.run(test_db_conn)
@@ -230,10 +236,11 @@ def test_reset_refresh_state_makes_the_next_refresh_a_full_backfill_again(test_d
 
     old_match = "NA1_OLD_0001"  # simulates a ranked game the old narrow window missed
     recent_match = "NA1_RECENT_0001"
+    old_match_ms = IN_SEASON_MS - 20 * _DAY_MS  # still within the current season, just earlier
 
     # Simulate a prior refresh (under the old code) that only ever saw the recent match, and
     # already advanced the watermark past it.
-    match_repo.upsert_refresh_state(test_db_conn, player_id, last_match_fetched_ms=1700000900000, status="ok")
+    match_repo.upsert_refresh_state(test_db_conn, player_id, last_match_fetched_ms=IN_SEASON_MS, status="ok")
     test_db_conn.commit()
 
     with respx.mock:
@@ -256,11 +263,11 @@ def test_reset_refresh_state_makes_the_next_refresh_a_full_backfill_again(test_d
         _mock_match_ids_endpoint(match_ids=[old_match, recent_match])
         _mock_match_detail_endpoint(
             match_id=old_match,
-            payload=_match_detail_payload(match_id=old_match, game_creation_ms=1600000000000),
+            payload=_match_detail_payload(match_id=old_match, game_creation_ms=old_match_ms),
         )
         _mock_match_detail_endpoint(
             match_id=recent_match,
-            payload=_match_detail_payload(match_id=recent_match, game_creation_ms=1700000900000),
+            payload=_match_detail_payload(match_id=recent_match, game_creation_ms=IN_SEASON_MS),
         )
         summary = pre_draft_refresh.run(test_db_conn)
 
@@ -273,6 +280,80 @@ def test_reset_refresh_state_on_player_with_no_watermark_returns_false(test_db_c
     player_id = _seed_player(test_db_conn)
     test_db_conn.commit()
     assert match_repo.reset_refresh_state(test_db_conn, player_id) is False
+
+
+def test_first_time_backfill_scopes_fetch_to_season_start_not_full_history(test_db_conn, tmp_path, monkeypatch):
+    """The user's actual bug report: a first-time (or reset) backfill must not reach back into a
+    prior season at all -- both for correctness (a teammate's "this season" stats shouldn't
+    include last season's games) and for speed (Riot's own startTime filtering means far fewer
+    matches/pages to fetch, not a client-side filter after the fact)."""
+    monkeypatch.setattr(config, "RAW_MATCHES_DIR", tmp_path / "matches")
+    monkeypatch.setattr(config, "RIOT_API_KEY", "RGAPI-fake")
+
+    _seed_player(test_db_conn)
+    _seed_champion(test_db_conn, champion_id=1, name="Ahri")
+    test_db_conn.commit()
+
+    with respx.mock:
+        _mock_account_endpoint()
+        _mock_mastery_endpoint()
+        route = respx.get(
+            url__regex=rf"https://americas\.api\.riotgames\.com/lol/match/v5/matches/by-puuid/{PUUID}/ids.*"
+        ).mock(return_value=httpx.Response(200, json=[]))
+        pre_draft_refresh.run(test_db_conn)
+
+    request_url = str(route.calls[0].request.url)
+    assert f"startTime={config.CURRENT_SEASON_START_EPOCH_MS // 1000}" in request_url
+    assert "type=ranked" in request_url
+
+
+def test_incremental_refresh_clamps_a_stale_pre_season_watermark_up_to_season_start(test_db_conn, tmp_path, monkeypatch):
+    """Defensive edge case: if a watermark somehow predates the season boundary (e.g. left over
+    from before CURRENT_SEASON_START_DATE was configured/bumped), the fetch must still floor at
+    the season start rather than trust the older watermark and reach into last season anyway."""
+    monkeypatch.setattr(config, "RAW_MATCHES_DIR", tmp_path / "matches")
+    monkeypatch.setattr(config, "RIOT_API_KEY", "RGAPI-fake")
+
+    player_id = _seed_player(test_db_conn)
+    _seed_champion(test_db_conn, champion_id=1, name="Ahri")
+    test_db_conn.commit()
+    match_repo.upsert_refresh_state(test_db_conn, player_id, last_match_fetched_ms=BEFORE_SEASON_MS, status="ok")
+    test_db_conn.commit()
+
+    with respx.mock:
+        _mock_account_endpoint()
+        _mock_mastery_endpoint()
+        route = respx.get(
+            url__regex=rf"https://americas\.api\.riotgames\.com/lol/match/v5/matches/by-puuid/{PUUID}/ids.*"
+        ).mock(return_value=httpx.Response(200, json=[]))
+        pre_draft_refresh.run(test_db_conn)
+
+    request_url = str(route.calls[0].request.url)
+    assert f"startTime={config.CURRENT_SEASON_START_EPOCH_MS // 1000}" in request_url
+
+
+def test_incremental_refresh_uses_watermark_when_it_is_after_season_start(test_db_conn, tmp_path, monkeypatch):
+    """The normal case: once a player has an in-season watermark, that (more recent) value wins
+    over the season floor -- refreshing stays a cheap incremental fetch, not a re-backfill."""
+    monkeypatch.setattr(config, "RAW_MATCHES_DIR", tmp_path / "matches")
+    monkeypatch.setattr(config, "RIOT_API_KEY", "RGAPI-fake")
+
+    player_id = _seed_player(test_db_conn)
+    _seed_champion(test_db_conn, champion_id=1, name="Ahri")
+    test_db_conn.commit()
+    match_repo.upsert_refresh_state(test_db_conn, player_id, last_match_fetched_ms=IN_SEASON_MS, status="ok")
+    test_db_conn.commit()
+
+    with respx.mock:
+        _mock_account_endpoint()
+        _mock_mastery_endpoint()
+        route = respx.get(
+            url__regex=rf"https://americas\.api\.riotgames\.com/lol/match/v5/matches/by-puuid/{PUUID}/ids.*"
+        ).mock(return_value=httpx.Response(200, json=[]))
+        pre_draft_refresh.run(test_db_conn)
+
+    request_url = str(route.calls[0].request.url)
+    assert f"startTime={IN_SEASON_MS // 1000}" in request_url
 
 
 def test_incremental_refresh_skips_already_fetched_match(test_db_conn, tmp_path, monkeypatch):

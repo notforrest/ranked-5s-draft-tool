@@ -148,11 +148,14 @@ def _refresh_one_player(conn, client: RiotAPIClient, player: dict) -> dict:
 
 
 def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str) -> dict:
-    """Fetches ranked match ids since this player's stored watermark (or, for a first-time
-    player with no watermark, the player's full ranked history up to
-    config.MATCH_HISTORY_SAFETY_CAP) via endpoints.get_all_ranked_match_ids, which pages through
-    Match-V5 with type=ranked rather than a single fixed-size window -- a first-time backfill no
-    longer risks non-ranked games crowding ranked ones out of a small window.
+    """Fetches ranked match ids since whichever is more recent of this player's stored watermark
+    or config.CURRENT_SEASON_START_EPOCH_MS (for a first-time player with no watermark, that floor
+    IS the season start) via endpoints.get_all_ranked_match_ids, which pages through Match-V5 with
+    type=ranked rather than a single fixed-size window -- a first-time backfill no longer risks
+    non-ranked games crowding ranked ones out of a small window, and never reaches back into a
+    prior season regardless of config.MATCH_HISTORY_SAFETY_CAP (both faster -- Riot's own
+    startTime filtering means far fewer pages -- and correct, since prior-season form isn't
+    "current" for pick/ban purposes).
 
     Writes each new match's raw JSON to disk, its metadata to `matches`, and inserts a
     match_participants row ONLY for participants whose puuid belongs to our roster -- looked up
@@ -163,16 +166,17 @@ def _refresh_match_history(conn, client: RiotAPIClient, player: dict, puuid: str
 
     refresh_state = match_repo.get_refresh_state(conn, player_id)
     watermark_ms = refresh_state["last_match_fetched_ms"] if refresh_state else None
+    effective_start_ms = max(watermark_ms or 0, config.CURRENT_SEASON_START_EPOCH_MS)
 
     if watermark_ms is None:
-        logger.info("  no watermark yet -- backfilling full ranked history (up to %d matches)...",
-                    config.MATCH_HISTORY_SAFETY_CAP)
+        logger.info("  no watermark yet -- backfilling this season's ranked history from %s (up to %d matches)...",
+                    config.CURRENT_SEASON_START_DATE, config.MATCH_HISTORY_SAFETY_CAP)
     else:
-        logger.info("  fetching ranked matches since watermark %d...", watermark_ms)
+        logger.info("  fetching ranked matches since %d...", effective_start_ms)
 
     match_ids = endpoints.get_all_ranked_match_ids(
         client, puuid, account_region,
-        start_time_epoch_s=(watermark_ms // 1000) if watermark_ms is not None else None,
+        start_time_epoch_s=effective_start_ms // 1000,
         safety_cap=config.MATCH_HISTORY_SAFETY_CAP,
     )
 

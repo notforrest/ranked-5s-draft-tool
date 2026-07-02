@@ -45,19 +45,25 @@ def get_teammates_in_match(conn: sqlite3.Connection, match_id: str, team_id: int
     return [dict(r) for r in rows]
 
 
-def get_all_roster_participants(conn: sqlite3.Connection, queue_ids: tuple[int, ...]) -> list[dict]:
+def get_all_roster_participants(
+    conn: sqlite3.Connection, queue_ids: tuple[int, ...], min_game_creation_ms: int | None = None,
+) -> list[dict]:
     """All match_participants rows for roster players (player_id NOT NULL), restricted to the
-    given queue ids, joined with match queue_id -- the base dataset for personal stats + roster
-    synergy/matchup aggregate jobs."""
+    given queue ids and (if given) to matches created at or after min_game_creation_ms, joined
+    with match queue_id -- the base dataset for personal stats + roster synergy/matchup aggregate
+    jobs. The season floor is applied here (not just at fetch time) so it stays correct even for
+    matches that were already cached locally before a season boundary was configured or changed."""
     placeholders = ",".join("?" * len(queue_ids))
-    rows = conn.execute(
-        f"""
+    query = f"""
         SELECT mp.* FROM match_participants mp
         JOIN matches m ON m.match_id = mp.match_id
         WHERE mp.player_id IS NOT NULL AND m.queue_id IN ({placeholders})
-        """,
-        queue_ids,
-    ).fetchall()
+        """
+    params: list = list(queue_ids)
+    if min_game_creation_ms is not None:
+        query += " AND m.game_creation_ms >= ?"
+        params.append(min_game_creation_ms)
+    rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
 
 
