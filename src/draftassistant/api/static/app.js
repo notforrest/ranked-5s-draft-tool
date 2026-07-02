@@ -37,7 +37,7 @@ const state = {
   champions: [],          // list of {champion_id, champion_key, name, tags, icon_path, ...}
   champById: new Map(),   // champion_id -> champion
   roster: [],             // active players from GET /api/roster
-  selectedRoles: new Map(), // player_id -> role ("" = selected but unassigned)
+  roleAssignments: new Map(), // role -> player_id (sparse -- unassigned roles are simply absent)
   ourSide: "BLUE",
   refreshOutcomeSeen: false,
 
@@ -164,68 +164,51 @@ async function loadRoster() {
 function renderRosterList() {
   const el = document.getElementById("roster-list");
   el.innerHTML = "";
-  for (const player of state.roster) {
+
+  const takenPlayerIds = new Set(state.roleAssignments.values());
+
+  for (const role of VALID_ROLES) {
     const row = document.createElement("div");
     row.className = "roster-row";
-    row.dataset.playerId = player.player_id;
+    row.dataset.role = role;
 
-    const checked = state.selectedRoles.has(player.player_id);
-    row.classList.toggle("selected", checked);
+    const assignedPlayerId = state.roleAssignments.get(role);
+    row.classList.toggle("selected", assignedPlayerId !== undefined);
 
-    const label = document.createElement("label");
+    const roleLabel = document.createElement("span");
+    roleLabel.className = "role-label";
+    roleLabel.textContent = role;
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = checked;
-    checkbox.addEventListener("change", () => onPlayerToggled(player.player_id, checkbox.checked));
-
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "player-name";
-    nameSpan.textContent = player.display_name;
-
-    const metaSpan = document.createElement("span");
-    metaSpan.className = "player-meta";
-    metaSpan.textContent = `${player.riot_game_name}#${player.riot_tag_line}`;
-
-    label.appendChild(checkbox);
-    label.appendChild(nameSpan);
-    label.appendChild(metaSpan);
-
-    const roleSelect = document.createElement("select");
-    roleSelect.disabled = !checked;
+    const playerSelect = document.createElement("select");
     const blank = document.createElement("option");
     blank.value = "";
-    blank.textContent = "role…";
-    roleSelect.appendChild(blank);
-    for (const role of VALID_ROLES) {
+    blank.textContent = "-- choose player --";
+    playerSelect.appendChild(blank);
+    for (const player of state.roster) {
+      // A player already taken by a DIFFERENT role is removed from this dropdown's options --
+      // but this role's own current pick must still appear (and be selected) even though
+      // they're "taken", otherwise re-rendering would silently blank this row out.
+      if (player.player_id !== assignedPlayerId && takenPlayerIds.has(player.player_id)) continue;
       const opt = document.createElement("option");
-      opt.value = role;
-      opt.textContent = role;
-      roleSelect.appendChild(opt);
+      opt.value = player.player_id;
+      opt.textContent = `${player.display_name} (${player.riot_game_name}#${player.riot_tag_line})`;
+      playerSelect.appendChild(opt);
     }
-    roleSelect.value = state.selectedRoles.get(player.player_id) || "";
-    roleSelect.addEventListener("change", () => {
-      state.selectedRoles.set(player.player_id, roleSelect.value);
-      validateRoles();
-    });
+    playerSelect.value = assignedPlayerId !== undefined ? String(assignedPlayerId) : "";
+    playerSelect.addEventListener("change", () => onRoleAssignmentChanged(role, playerSelect.value));
 
-    row.appendChild(label);
-    row.appendChild(roleSelect);
+    row.appendChild(roleLabel);
+    row.appendChild(playerSelect);
     el.appendChild(row);
   }
   validateRoles();
 }
 
-function onPlayerToggled(playerId, isChecked) {
-  if (isChecked) {
-    if (state.selectedRoles.size >= 5) {
-      // Already at 5 -- revert this checkbox visually via a full re-render since we never added it.
-      renderRosterList();
-      return;
-    }
-    state.selectedRoles.set(playerId, "");
+function onRoleAssignmentChanged(role, playerIdValue) {
+  if (playerIdValue === "") {
+    state.roleAssignments.delete(role);
   } else {
-    state.selectedRoles.delete(playerId);
+    state.roleAssignments.set(role, Number(playerIdValue));
   }
   renderRosterList();
 }
@@ -234,27 +217,17 @@ function validateRoles() {
   const msgEl = document.getElementById("role-validation");
   const startBtn = document.getElementById("start-draft-btn");
 
-  const count = state.selectedRoles.size;
+  const count = state.roleAssignments.size;
   if (count !== 5) {
-    msgEl.textContent = `Select exactly 5 players (currently ${count}).`;
+    msgEl.textContent = `Assign a player to every role (${count}/5 assigned).`;
     msgEl.classList.remove("ok");
     startBtn.disabled = true;
     return;
   }
 
-  const roles = Array.from(state.selectedRoles.values());
-  if (roles.some((r) => !r)) {
-    msgEl.textContent = "Assign a role to every selected player.";
-    msgEl.classList.remove("ok");
-    startBtn.disabled = true;
-    return;
-  }
-
-  const sortedRoles = [...roles].sort();
-  const sortedValid = [...VALID_ROLES].sort();
-  const coversAllExactlyOnce = JSON.stringify(sortedRoles) === JSON.stringify(sortedValid);
-  if (!coversAllExactlyOnce) {
-    msgEl.textContent = `Each role (${VALID_ROLES.join(", ")}) must be assigned exactly once.`;
+  const playerIds = Array.from(state.roleAssignments.values());
+  if (new Set(playerIds).size !== playerIds.length) {
+    msgEl.textContent = "Each player can only be assigned to one role.";
     msgEl.classList.remove("ok");
     startBtn.disabled = true;
     return;
@@ -444,7 +417,7 @@ async function onStartDraftClicked() {
   const errEl = document.getElementById("start-draft-error");
   errEl.hidden = true;
 
-  const lineup = Array.from(state.selectedRoles.entries()).map(([player_id, assigned_role]) => ({
+  const lineup = Array.from(state.roleAssignments.entries()).map(([assigned_role, player_id]) => ({
     player_id,
     assigned_role,
   }));
@@ -501,7 +474,7 @@ function onNewDraftClicked() {
   localStorage.removeItem(LOCAL_STORAGE_KEY);
   state.draftSessionId = null;
   state.draft = null;
-  state.selectedRoles = new Map();
+  state.roleAssignments = new Map();
   hoverController.cache.clear();
   showSetupView();
   loadRoster();

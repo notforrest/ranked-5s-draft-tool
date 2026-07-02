@@ -110,7 +110,14 @@ button { font-family: var(--font); cursor: pointer; }
 .roster-row .player-name { font-weight: 600; }
 .roster-row .player-meta { color: var(--text-dim); font-size: 12px; }
 
+.roster-row .role-label {
+  flex: 0 0 90px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
 .roster-row select {
+  flex: 1;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);

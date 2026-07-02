@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "draft-assistant",
+      "runtimeExecutable": ".venv/bin/uvicorn",
+      "runtimeArgs": ["draftassistant.api.main:app", "--app-dir", "src", "--host", "127.0.0.1", "--port", "8731"],
+      "port": 8731
+    }
+  ]
+}
