@@ -45,6 +45,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import McpError
 
 logger = logging.getLogger(__name__)
 
@@ -173,10 +174,20 @@ def _parse_tool_result(result) -> Any:
 
 
 async def call_tool(session: ClientSession, name: str, arguments: dict[str, Any]) -> Any:
-    """Generic tool invocation -- calls `name` with `arguments`, raises OpggMcpToolError if the
-    server reports failure, otherwise returns the parsed payload (see _parse_tool_result)."""
+    """Generic tool invocation -- raises OpggMcpToolError on EITHER of the two distinct failure
+    modes MCP allows (confirmed live, both real): a soft failure the tool itself reports
+    (CallToolResult.isError=True, e.g. a malformed argument the tool validated itself), or a hard
+    JSON-RPC-level error the server raises before a result even exists (mcp.shared.exceptions.
+    McpError -- confirmed live via a real "Summoner not found" error for an invalid Riot ID,
+    which surfaces this way, NOT as isError=True). Callers that only caught OpggMcpToolError
+    before this fix would see an unhandled McpError instead for exactly this kind of failure --
+    normalizing both into one exception type here means every caller only ever needs one except
+    clause."""
     logger.info("Calling OP.GG MCP tool %s with arguments=%r", name, arguments)
-    result = await session.call_tool(name, arguments)
+    try:
+        result = await session.call_tool(name, arguments)
+    except McpError as e:
+        raise OpggMcpToolError(name, str(e)) from e
     if result.isError:
         raise OpggMcpToolError(name, _parse_tool_result(result))
     return _parse_tool_result(result)
@@ -198,17 +209,27 @@ class SummonerLeagueEntry:
 
 
 @dataclass
+class ChampionPoolEntry:
+    champion_name: str | None
+    games: int | None
+    wins: int | None
+    losses: int | None
+
+
+@dataclass
 class SummonerProfile:
     game_name: str | None
     tagline: str | None
     level: int | None
     league_entries: list[SummonerLeagueEntry]
+    champion_pool: list[ChampionPoolEntry]
 
 
 _SUMMONER_PROFILE_FIELDS = [
     "data.summoner.{game_name,tagline,level}",
     "data.summoner.league_stats[].{game_type,win,lose}",
     "data.summoner.league_stats[].tier_info.{tier,division,lp}",
+    "data.summoner.ranked_most_champions.my_champion_stats[].{champion_name,play,win,lose}",
 ]
 
 
@@ -221,7 +242,12 @@ async def get_summoner_profile(
     inferred from the input schema's own examples (KR, BR, EUNE) but not individually tested.
     Unranked queues (no games played, e.g. FLEXRANKED/ARENA for an inactive player) come back
     with every field null -- those still appear as an entry with all-None fields rather than
-    being omitted, so filter on e.g. `entry.wins is not None` if you only want played queues."""
+    being omitted, so filter on e.g. `entry.wins is not None` if you only want played queues.
+    champion_pool is this SEASON's ranked_most_champions (confirmed live, top-10-ish by games
+    played) -- distinct from and NOT a replacement for personal_champion_stats (this app's own
+    Riot-Match-V5-sourced, per-role, exact-season-boundary data for ROSTER players specifically);
+    this is most useful for a player NOT on the roster (scouting), where personal_champion_stats
+    has nothing at all."""
     arguments = {
         "game_name": game_name, "tag_line": tag_line, "region": region, "lang": lang,
         "desired_output_fields": _SUMMONER_PROFILE_FIELDS,
@@ -240,9 +266,16 @@ async def get_summoner_profile(
         )
         for stat in summoner.get("league_stats", []) or []
     ]
+    champion_pool = [
+        ChampionPoolEntry(
+            champion_name=stat.get("champion_name"), games=stat.get("play"),
+            wins=stat.get("win"), losses=stat.get("lose"),
+        )
+        for stat in (summoner.get("ranked_most_champions") or {}).get("my_champion_stats", []) or []
+    ]
     return SummonerProfile(
         game_name=summoner.get("game_name"), tagline=summoner.get("tagline"),
-        level=summoner.get("level"), league_entries=entries,
+        level=summoner.get("level"), league_entries=entries, champion_pool=champion_pool,
     )
 
 
@@ -301,3 +334,179 @@ async def list_lane_meta_champions(
                 rank=entry.get("rank"),
             ))
     return rows
+
+
+def to_opgg_champion_key(display_name: str) -> str:
+    """DDragon display name (e.g. "Vel'Koz", "Twisted Fate", "Wukong") -> the identifier
+    get_champion_analysis/get_lane_matchup_guide expect. Confirmed live that this tool family is
+    forgiving of format: "KAISA", "KAI_SA", and "KAI'SA" all worked identically, as did
+    "WUKONG" and DDragon's own internal key "MONKEYKING" (both resolve to the same champion) --
+    so a simple "strip everything but letters/digits, uppercase" transform is sufficient; no
+    per-champion alias table needed."""
+    return re.sub(r"[^A-Za-z0-9]", "", display_name).upper()
+
+
+_ROLE_TO_OPGG_POSITION = {v: k for k, v in _OPGG_LANE_TO_ROLE.items()}  # e.g. "BOTTOM" -> "adc"
+
+
+@dataclass
+class ChampionCounter:
+    champion_name: str | None
+    win_rate: float | None  # this is the COUNTER champion's win rate, i.e. > 0.5 means it beats you
+    games: int | None
+
+
+@dataclass
+class ChampionAllySynergy:
+    ally_position: str | None  # this project's role vocabulary
+    ally_champion_name: str | None
+    win_rate: float | None
+    games: int | None
+
+
+@dataclass
+class ChampionAnalysis:
+    champion_name: str
+    position: str  # this project's role vocabulary
+    win_rate: float | None
+    pick_rate: float | None
+    ban_rate: float | None
+    tier: int | None
+    strong_counters: list[ChampionCounter]  # champions that beat THIS champion
+    weak_counters: list[ChampionCounter]    # champions THIS champion beats
+    synergies: list[ChampionAllySynergy]
+
+
+_CHAMPION_ANALYSIS_FIELDS = [
+    "data.summary.positions[].name",
+    "data.summary.positions[].stats.{ban_rate,pick_rate,win_rate}",
+    "data.summary.positions[].stats.tier_data.tier",
+    "data.strong_counters[].{champion_name,win_rate,play}",
+    "data.weak_counters[].{champion_name,win_rate,play}",
+    *[f"data.synergies.{lane}[].{{synergy_champion_name,win_rate,play}}" for lane in _OPGG_LANE_TO_ROLE],
+]
+
+
+async def get_champion_analysis(
+    session: ClientSession, *, champion: str, position: str, game_mode: str = "ranked",
+    lang: str = "en_US", **extra_arguments: Any,
+) -> ChampionAnalysis:
+    """champion: a display name (e.g. "Vel'Koz") -- converted internally via
+    to_opgg_champion_key. position MUST be one of top/mid/jungle/adc/support -- "all" is listed
+    in the input schema's enum but the server rejects it live ("The selected position is
+    invalid."); this is a real, confirmed server quirk, not a guess.
+
+    IMPORTANT confirmed-live quirk: data.summary.positions[] always lists EVERY position the
+    champion is played in (e.g. Vel'Koz returns SUPPORT, MID, AND ADC entries) regardless of the
+    `position` argument, and is NOT ordered to put the requested position first (Vel'Koz with
+    position="mid" returned SUPPORT at index 0). The requested position's stats are located by
+    matching `name` explicitly, never by assuming positions[0].
+
+    This is a per-champion-per-position call (~2s each, live-measured) -- there is no bulk
+    "every champion" variant. See ingest/opgg_mcp_ingest.py for how this gets used for a bounded
+    subset of champions (not all ~170 x 5 positions) rather than exhaustively."""
+    arguments = {
+        "game_mode": game_mode, "champion": to_opgg_champion_key(champion), "position": position,
+        "lang": lang, "desired_output_fields": _CHAMPION_ANALYSIS_FIELDS,
+        **extra_arguments,
+    }
+    payload = await call_tool(session, "lol_get_champion_analysis", arguments)
+    data = (payload or {}).get("data", {}) or {}
+    all_positions = (data.get("summary") or {}).get("positions") or []
+    # OP.GG's own position names are TOP/JUNGLE/MID/ADC/SUPPORT -- match against `position.upper()`
+    # directly here, NOT _OPGG_LANE_TO_ROLE (which maps "adc" to this project's "BOTTOM", a name
+    # the API response itself never uses).
+    matched = next((p for p in all_positions if p.get("name") == position.upper()), {})
+    stats = matched.get("stats") or {}
+
+    strong = [
+        ChampionCounter(champion_name=c.get("champion_name"), win_rate=c.get("win_rate"), games=c.get("play"))
+        for c in data.get("strong_counters", []) or []
+    ]
+    weak = [
+        ChampionCounter(champion_name=c.get("champion_name"), win_rate=c.get("win_rate"), games=c.get("play"))
+        for c in data.get("weak_counters", []) or []
+    ]
+    synergies = [
+        ChampionAllySynergy(
+            ally_position=_OPGG_LANE_TO_ROLE.get(lane_key, lane_key.upper()),
+            ally_champion_name=s.get("synergy_champion_name"), win_rate=s.get("win_rate"), games=s.get("play"),
+        )
+        for lane_key, entries in (data.get("synergies") or {}).items()
+        for s in entries or []
+    ]
+    return ChampionAnalysis(
+        champion_name=champion, position=_OPGG_LANE_TO_ROLE.get(position, position.upper()),
+        win_rate=stats.get("win_rate"), pick_rate=stats.get("pick_rate"), ban_rate=stats.get("ban_rate"),
+        tier=(stats.get("tier_data") or {}).get("tier"),
+        strong_counters=strong, weak_counters=weak, synergies=synergies,
+    )
+
+
+async def get_lane_matchup_guide(
+    session: ClientSession, *, my_champion: str, opponent_champion: str, position: str,
+    lang: str = "en_US", **extra_arguments: Any,
+) -> dict:
+    """Returns the raw parsed payload (not a typed dataclass) -- this tool's response is a large,
+    qualitative "matchup guide" (runes/summoner-spells/counters context for a specific champion
+    matchup), more suited to being displayed close to verbatim than reshaped into rigid fields.
+    Intended for pre-draft prep (e.g. scripts/opgg_mcp_demo.py-style manual lookups), NOT the
+    live hover panel -- see this module's docstring on why live network calls don't belong on
+    that path. Same "all" position quirk as get_champion_analysis applies here."""
+    arguments = {
+        "position": position, "my_champion": to_opgg_champion_key(my_champion),
+        "opponent_champion": to_opgg_champion_key(opponent_champion), "lang": lang,
+        **extra_arguments,
+    }
+    return await call_tool(session, "lol_get_lane_matchup_guide", arguments)
+
+
+@dataclass
+class RecentMatch:
+    game_type: str | None
+    created_at: str | None
+    game_length_second: int | None
+    champion_name: str | None
+    result: str | None  # e.g. "WIN"/"LOSE" -- passed through as-is, not normalized to bool
+    kills: int | None
+    deaths: int | None
+    assists: int | None
+
+
+_SUMMONER_MATCHES_FIELDS = [
+    "data.game_history[].{created_at,game_length_second,game_type}",
+    "data.game_history[].participants[].{champion_name,position}",
+    "data.game_history[].participants[].stats.{assist,death,kill,result}",
+]
+
+
+async def list_summoner_matches(
+    session: ClientSession, *, game_name: str, tag_line: str, region: str, limit: int = 10,
+    lang: str = "en_US", **extra_arguments: Any,
+) -> list[RecentMatch]:
+    """limit is clamped server-side to [5, 20] per the input schema. Confirmed live: each
+    match's participants[] contains exactly ONE entry (the queried summoner) -- the tool's own
+    description ("target summoner only, excludes enemy stats") is accurate, not aspirational.
+    NOT wired into the roster refresh pipeline (personal_champion_stats already covers roster
+    players far more precisely from Riot's own Match-V5 data) -- this exists for looking up
+    players who AREN'T on the roster (opponent scouting), where nothing else in this codebase
+    can reach at all."""
+    arguments = {
+        "game_name": game_name, "tag_line": tag_line, "region": region, "limit": limit,
+        "lang": lang, "desired_output_fields": _SUMMONER_MATCHES_FIELDS,
+        **extra_arguments,
+    }
+    payload = await call_tool(session, "lol_list_summoner_matches", arguments)
+    games = (payload or {}).get("data", {}).get("game_history", []) or []
+    matches = []
+    for game in games:
+        participants = game.get("participants") or []
+        me = participants[0] if participants else {}
+        stats = me.get("stats") or {}
+        matches.append(RecentMatch(
+            game_type=game.get("game_type"), created_at=game.get("created_at"),
+            game_length_second=game.get("game_length_second"), champion_name=me.get("champion_name"),
+            result=stats.get("result"), kills=stats.get("kill"), deaths=stats.get("death"),
+            assists=stats.get("assist"),
+        ))
+    return matches

@@ -7,6 +7,7 @@ from draftassistant.db.repositories import (
     mastery_repo,
     personal_stats_repo,
     roster_repo,
+    summoner_rank_repo,
     synergy_repo,
     tierlist_repo,
 )
@@ -84,12 +85,14 @@ def test_fully_covered_champion_pick_context(test_db_conn):
     assert detail["global"]["has_data"] is True
     assert detail["global"]["win_rate"] == 0.532
     assert detail["global"]["pick_rate"] == 0.081
+    assert detail["global"]["ban_rate"] == 0.043
     assert detail["global"]["sample_size"] == 14200
 
     mid_player = next(r for r in detail["roster"] if r["player_id"] == 3)
     assert mid_player["is_assigned_to_role"] is True
     assert mid_player["mastery"] == {"level": 7, "points": 187543}
     assert mid_player["personal"] == {"games": 42, "wins": 27, "win_rate": 27 / 42}
+    assert mid_player["rank"] is None  # no summoner_rank row seeded for this test
 
     other_player = next(r for r in detail["roster"] if r["player_id"] == 1)
     assert other_player["mastery"] is None
@@ -114,10 +117,11 @@ def test_data_thin_champion_degrades_gracefully(test_db_conn):
     detail = get_champion_detail(conn, state, champion_id=99, roster_lookup=_roster_lookup(conn))
 
     assert detail["role"] is None
-    assert detail["global"] == {"win_rate": None, "pick_rate": None,
+    assert detail["global"] == {"win_rate": None, "pick_rate": None, "ban_rate": None,
                                  "tier": None, "sample_size": None, "has_data": False}
     assert len(detail["roster"]) == 5
-    assert all(r["mastery"] is None and r["personal"] is None for r in detail["roster"])
+    assert all(r["mastery"] is None and r["personal"] is None and r["rank"] is None
+               for r in detail["roster"])
     assert detail["synergy_with_picks"] == []
 
 
@@ -175,6 +179,88 @@ def test_roster_rows_are_ordered_by_lane_regardless_of_roster_storage_order(test
     assert [r["assigned_role"] for r in detail["roster"]] == [
         "TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT",
     ]
+
+
+def test_roster_rows_include_rank_when_present(test_db_conn):
+    conn = test_db_conn
+    _insert_players(conn, 5)
+    _champion(conn, 99, "ObscureChamp")
+    summoner_rank_repo.replace_player_rank(conn, 3, [
+        {"queue_type": "SOLORANKED", "tier": "GOLD", "division": 2, "lp": 40, "wins": 50, "losses": 45},
+        {"queue_type": "FLEXRANKED", "tier": None, "division": None, "lp": None, "wins": None, "losses": None},
+    ])
+    conn.commit()
+
+    state = DraftState(our_side="BLUE", roster=_basic_roster())
+    detail = get_champion_detail(conn, state, champion_id=99, roster_lookup=_roster_lookup(conn))
+
+    ranked_player = next(r for r in detail["roster"] if r["player_id"] == 3)
+    assert ranked_player["rank"] == {"tier": "GOLD", "division": 2, "lp": 40}
+
+    unranked_player = next(r for r in detail["roster"] if r["player_id"] == 1)
+    assert unranked_player["rank"] is None
+
+
+def test_synergy_with_picks_falls_back_to_opgg_source_when_no_roster_data(test_db_conn):
+    conn = test_db_conn
+    _insert_players(conn, 5)
+    _champion(conn, 1, "Ahri")
+    _champion(conn, 2, "LeeSin")
+    synergy_repo.replace_synergy(conn, "synergy_opgg", [(1, 2, 820, 443)])
+    conn.commit()
+
+    state = DraftState(our_side="BLUE", roster=_basic_roster())
+    for slot in range(6):
+        state.enter(slot, champion_id=900 + slot)
+    state.enter(6, champion_id=2)
+
+    detail = get_champion_detail(conn, state, champion_id=1, roster_lookup=_roster_lookup(conn))
+    assert detail["synergy_with_picks"] == [
+        {"ally_champion_id": 2, "ally_champion_name": "LeeSin", "games_together": 820,
+         "win_rate_together": 443 / 820, "source": "opgg"}
+    ]
+
+
+def test_synergy_with_picks_prefers_roster_over_opgg_over_pro(test_db_conn):
+    """Preference order matters: roster data (our own games) should win over opgg's larger
+    aggregate, which should win over curated pro data, when more than one source has a row."""
+    conn = test_db_conn
+    _insert_players(conn, 5)
+    _champion(conn, 1, "Ahri")
+    _champion(conn, 2, "LeeSin")
+    synergy_repo.replace_synergy(conn, "synergy_pro", [(1, 2, 50, 30)])
+    synergy_repo.replace_synergy(conn, "synergy_opgg", [(1, 2, 820, 443)])
+    synergy_repo.replace_synergy(conn, "synergy_roster", [(1, 2, 10, 8)])
+    conn.commit()
+
+    state = DraftState(our_side="BLUE", roster=_basic_roster())
+    for slot in range(6):
+        state.enter(slot, champion_id=900 + slot)
+    state.enter(6, champion_id=2)
+
+    detail = get_champion_detail(conn, state, champion_id=1, roster_lookup=_roster_lookup(conn))
+    assert detail["synergy_with_picks"][0]["source"] == "roster"
+    assert detail["synergy_with_picks"][0]["games_together"] == 10
+
+
+def test_ban_threat_falls_back_to_opgg_matchup_source(test_db_conn):
+    conn = test_db_conn
+    _insert_players(conn, 5)
+    _champion(conn, 1, "Zed")
+    _champion(conn, 2, "Ahri")
+    mastery_repo.replace_player_mastery(
+        conn, player_id=3, entries=[{"championId": 2, "championLevel": 7, "championPoints": 90000}],
+    )
+    synergy_repo.replace_matchup(conn, "matchup_opgg", [(1, 2, 200, 118), (2, 1, 200, 82)])
+    conn.commit()
+
+    state = DraftState(our_side="BLUE", roster=_basic_roster())
+    detail = get_champion_detail(conn, state, champion_id=1, roster_lookup=_roster_lookup(conn))
+
+    threat = detail["ban_threat"]["counters_comfort_pool"]
+    assert len(threat) == 1
+    assert threat[0]["source"] == "opgg"
+    assert threat[0]["win_rate_against"] == 118 / 200
 
 
 def test_requested_role_falls_back_to_inference_when_invalid(test_db_conn):

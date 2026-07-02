@@ -121,6 +121,9 @@ function wireStaticHandlers() {
   document.getElementById("undo-btn").addEventListener("click", onUndoClicked);
   document.getElementById("fetch-tierlist-btn").addEventListener("click", onFetchTierListClicked);
   document.getElementById("fetch-oe-btn").addEventListener("click", onFetchOracleElixirClicked);
+  document.getElementById("fetch-opgg-lanemeta-btn").addEventListener("click", onFetchOpggMcpLaneMetaClicked);
+  document.getElementById("fetch-opgg-ranks-btn").addEventListener("click", onFetchOpggMcpRanksClicked);
+  document.getElementById("fetch-opgg-analysis-btn").addEventListener("click", onFetchOpggMcpAnalysisClicked);
   document.getElementById("oe-upload-input").addEventListener("change", onOracleElixirFileSelected);
 
   document.querySelectorAll(".side-btn").forEach((btn) => {
@@ -186,7 +189,8 @@ function renderRosterList() {
       if (player.player_id !== assignedPlayerId && takenPlayerIds.has(player.player_id)) continue;
       const opt = document.createElement("option");
       opt.value = player.player_id;
-      opt.textContent = `${player.display_name} (${player.riot_game_name}#${player.riot_tag_line})`;
+      const rankSuffix = player.rank ? ` — ${formatRank(player.rank)}` : "";
+      opt.textContent = `${player.display_name} (${player.riot_game_name}#${player.riot_tag_line})${rankSuffix}`;
       playerSelect.appendChild(opt);
     }
     playerSelect.value = assignedPlayerId !== undefined ? String(assignedPlayerId) : "";
@@ -352,6 +356,79 @@ async function onFetchTierListClicked() {
     statusEl.className = "refresh-status error";
     statusEl.textContent = `Fetch failed: ${e.message}. The manual tier_list.yaml path still `
       + `works independently -- see the README.`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function onFetchOpggMcpLaneMetaClicked() {
+  const btn = document.getElementById("fetch-opgg-lanemeta-btn");
+  const statusEl = document.getElementById("opgg-lanemeta-status");
+
+  btn.disabled = true;
+  statusEl.hidden = false;
+  statusEl.className = "refresh-status loading";
+  statusEl.textContent = "Fetching from OP.GG's MCP server…";
+
+  try {
+    const summary = await api("POST", "/api/refresh/opgg-mcp/lane-meta");
+    statusEl.className = "refresh-status success";
+    statusEl.textContent = `Imported ${summary.entries_imported} role-entries with ban rate `
+      + `(patch ${summary.patch}).`
+      + (summary.champions_unresolved.length
+        ? ` ${summary.champions_unresolved.length} champion name(s) unresolved.`
+        : "");
+  } catch (e) {
+    statusEl.className = "refresh-status error";
+    statusEl.textContent = `Fetch failed: ${e.message}.`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function onFetchOpggMcpRanksClicked() {
+  const btn = document.getElementById("fetch-opgg-ranks-btn");
+  const statusEl = document.getElementById("opgg-ranks-status");
+
+  btn.disabled = true;
+  statusEl.hidden = false;
+  statusEl.className = "refresh-status loading";
+  statusEl.textContent = "Fetching roster ranks from OP.GG's MCP server…";
+
+  try {
+    const summary = await api("POST", "/api/refresh/opgg-mcp/summoner-ranks");
+    const errors = summary.players.filter((p) => p.status === "error");
+    statusEl.className = errors.length ? "refresh-status partial" : "refresh-status success";
+    statusEl.textContent = `Fetched ranks for ${summary.players.length - errors.length}/${summary.players.length} player(s).`
+      + (errors.length ? ` Failed: ${errors.map((p) => p.display_name).join(", ")}.` : "");
+  } catch (e) {
+    statusEl.className = "refresh-status error";
+    statusEl.textContent = `Fetch failed: ${e.message}.`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function onFetchOpggMcpAnalysisClicked() {
+  const btn = document.getElementById("fetch-opgg-analysis-btn");
+  const statusEl = document.getElementById("opgg-analysis-status");
+
+  btn.disabled = true;
+  statusEl.hidden = false;
+  statusEl.className = "refresh-status loading";
+  statusEl.textContent = "Analyzing champions (this can take a couple of minutes)…";
+
+  try {
+    const summary = await api("POST", "/api/refresh/opgg-mcp/champion-analysis", { top_n_per_lane: 10 });
+    statusEl.className = "refresh-status success";
+    statusEl.textContent = `Analyzed ${summary.champions_analyzed}/${summary.champion_positions_requested} `
+      + `champion(s): ${summary.matchup_pairs} matchup pair(s), ${summary.synergy_pairs} synergy pair(s).`
+      + (summary.champions_unresolved.length
+        ? ` ${summary.champions_unresolved.length} name(s) unresolved.`
+        : "");
+  } catch (e) {
+    statusEl.className = "refresh-status error";
+    statusEl.textContent = `Fetch failed: ${e.message}.`;
   } finally {
     btn.disabled = false;
   }
@@ -861,6 +938,20 @@ function formatRealPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+const _RANK_DIVISION_ROMAN = { 1: "I", 2: "II", 3: "III", 4: "IV" };
+const _APEX_TIERS = new Set(["CHALLENGER", "GRANDMASTER", "MASTER"]);
+
+function formatRank(rank) {
+  // Apex tiers (CHALLENGER/GRANDMASTER/MASTER) don't really have divisions -- LP alone
+  // identifies standing -- but confirmed live that OP.GG's API still returns division=1 for
+  // them rather than null, so this checks the tier name directly instead of trusting division
+  // to be absent.
+  const divisionText = !_APEX_TIERS.has(rank.tier) && rank.division
+    ? ` ${_RANK_DIVISION_ROMAN[rank.division] || rank.division}` : "";
+  const lpText = rank.lp !== null && rank.lp !== undefined ? ` ${rank.lp} LP` : "";
+  return `${rank.tier}${divisionText}${lpText}`;
+}
+
 /* ============================================================
    Champion detail hover panel
    ============================================================ */
@@ -986,15 +1077,21 @@ function renderChampionDetailPanel(detail) {
 function renderCdpGlobalStats(global) {
   const wr = document.getElementById("cdp-winrate");
   const pr = document.getElementById("cdp-pickrate");
+  const br = document.getElementById("cdp-banrate");
   const sample = document.getElementById("cdp-sample");
 
   if (!global.has_data) {
-    wr.textContent = pr.textContent = "--";
+    wr.textContent = pr.textContent = br.textContent = "--";
     sample.textContent = "No tier data for this role/patch yet.";
     return;
   }
   wr.textContent = formatRealPercent(global.win_rate);
   pr.textContent = formatRealPercent(global.pick_rate);
+  // ban_rate can still be individually null even when has_data is true (e.g. a row imported
+  // from the REST tier-list scrape, which has no ban rate at all, rather than the OP.GG MCP
+  // source) -- "--" for just that one stat rather than "no data" for the whole section.
+  br.textContent = global.ban_rate === null || global.ban_rate === undefined
+    ? "--" : formatRealPercent(global.ban_rate);
   sample.textContent = global.sample_size
     ? `Based on ${global.sample_size.toLocaleString()} games`
     : "Sample size unknown";
@@ -1018,6 +1115,13 @@ function renderCdpRoster(roster) {
     roleTag.className = "cdp-roster-role-tag";
     roleTag.textContent = r.assigned_role;
     row.appendChild(roleTag);
+
+    if (r.rank) {
+      const rankTag = document.createElement("span");
+      rankTag.className = "cdp-roster-rank-tag";
+      rankTag.textContent = formatRank(r.rank);
+      row.appendChild(rankTag);
+    }
 
     const stats = document.createElement("span");
     stats.className = "cdp-roster-stats";

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from draftassistant import config
 from draftassistant.api.deps import get_db
-from draftassistant.db.repositories import roster_repo
+from draftassistant.db.repositories import roster_repo, summoner_rank_repo
 
 router = APIRouter(tags=["roster"])
 
@@ -22,7 +22,18 @@ router = APIRouter(tags=["roster"])
 # ---------------------------------------------------------------------------
 @router.get("/roster")
 def list_roster(conn: sqlite3.Connection = Depends(get_db)) -> list[dict]:
-    return roster_repo.get_active_players(conn)
+    """Enriches each player with their SOLORANKED standing (null until
+    ingest/opgg_mcp_ingest.py's import_summoner_ranks has been run at least once) so the setup
+    screen's role-assignment list can show it -- avoids a second round trip for what's otherwise
+    a small, cheap per-player lookup."""
+    players = roster_repo.get_active_players(conn)
+    for player in players:
+        rank_row = summoner_rank_repo.get_player_rank(conn, player["player_id"], "SOLORANKED")
+        player["rank"] = (
+            None if rank_row is None or rank_row["tier"] is None
+            else {"tier": rank_row["tier"], "division": rank_row["division"], "lp": rank_row["lp"]}
+        )
+    return players
 
 
 # ---------------------------------------------------------------------------

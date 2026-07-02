@@ -69,6 +69,30 @@
         </label>
         <div id="oe-status" class="refresh-status" hidden></div>
       </div>
+
+      <div class="meta-subsection">
+        <div class="meta-subsection-title">OP.GG MCP data <span class="panel-optional">(prototype)</span></div>
+        <p class="panel-hint panel-hint-small">Fetched via OP.GG's official MCP server &mdash;
+          adds real ban rate (missing from the tier list above) and rank/LP (not available from
+          any other source in this tool). Live-verified but experimental.</p>
+
+        <div class="meta-opgg-mcp-row">
+          <button id="fetch-opgg-lanemeta-btn" class="btn btn-secondary btn-small">Fetch Ban Rate + Tier List</button>
+          <div id="opgg-lanemeta-status" class="refresh-status" hidden></div>
+        </div>
+
+        <div class="meta-opgg-mcp-row">
+          <button id="fetch-opgg-ranks-btn" class="btn btn-secondary btn-small">Fetch Roster Ranks</button>
+          <div id="opgg-ranks-status" class="refresh-status" hidden></div>
+        </div>
+
+        <div class="meta-opgg-mcp-row">
+          <button id="fetch-opgg-analysis-btn" class="btn btn-secondary btn-small">Fetch Champion Counters/Synergies</button>
+          <p class="panel-hint panel-hint-small">Slow &mdash; roughly 2 seconds per champion analyzed
+            (top 10 per lane by default, so ~100 seconds). Run "Fetch Ban Rate + Tier List" first.</p>
+          <div id="opgg-analysis-status" class="refresh-status" hidden></div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -158,6 +182,7 @@
       <div class="cdp-stat-row">
         <span class="cdp-stat"><span id="cdp-winrate" class="cdp-stat-value"></span><span class="cdp-stat-label">Win rate</span></span>
         <span class="cdp-stat"><span id="cdp-pickrate" class="cdp-stat-value"></span><span class="cdp-stat-label">Pick rate</span></span>
+        <span class="cdp-stat"><span id="cdp-banrate" class="cdp-stat-value"></span><span class="cdp-stat-label">Ban rate</span></span>
       </div>
       <div id="cdp-sample" class="cdp-sample"></div>
     </div>

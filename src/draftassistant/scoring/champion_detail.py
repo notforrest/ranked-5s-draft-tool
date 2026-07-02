@@ -18,6 +18,7 @@ from draftassistant.db.repositories import (
     champion_repo,
     mastery_repo,
     personal_stats_repo,
+    summoner_rank_repo,
     synergy_repo,
     tierlist_repo,
 )
@@ -49,21 +50,23 @@ def _resolve_role(
 
 
 def _global_stats(conn: sqlite3.Connection, champion_id: int, role: str | None, patch: str | None) -> dict:
-    """Deliberately omits ban_rate: OP.GG's auto-fetch (ingest/tier_list.py:import_from_opgg) has
-    no ban rate in its response at all, so it's never populated for the vast majority of rows --
-    only the hand-maintained YAML path can set it (global_tier_list.ban_rate still exists in the
-    schema for that path), which made this stat inconsistently blank in the hover panel for most
-    champions. Removed rather than shown-but-usually-empty."""
+    """ban_rate was removed then re-added (both 2026-07-01): OP.GG's REST auto-fetch
+    (ingest/tier_list.py:import_from_opgg) has no ban rate in its response at all, so it was
+    dropped from here rather than shown-but-usually-empty. It's back now that
+    ingest/opgg_mcp_ingest.py's import_lane_meta (OP.GG's official MCP server, a separate source)
+    populates it for real -- get_tier_entry doesn't care which source_note wrote the row it
+    finds, so this needs no source-specific branching, just whichever row is latest for this
+    (champion, role, patch)."""
     if role is None or patch is None:
-        return {"win_rate": None, "pick_rate": None, "tier": None,
+        return {"win_rate": None, "pick_rate": None, "ban_rate": None, "tier": None,
                 "sample_size": None, "has_data": False}
     entry = tierlist_repo.get_tier_entry(conn, champion_id, role, patch)
     if entry is None:
-        return {"win_rate": None, "pick_rate": None, "tier": None,
+        return {"win_rate": None, "pick_rate": None, "ban_rate": None, "tier": None,
                 "sample_size": None, "has_data": False}
     return {
         "win_rate": entry["win_rate"], "pick_rate": entry["pick_rate"],
-        "tier": entry["tier"],
+        "ban_rate": entry["ban_rate"], "tier": entry["tier"],
         "sample_size": entry["sample_size"], "has_data": True,
     }
 
@@ -79,6 +82,7 @@ def _roster_rows(conn: sqlite3.Connection, state: DraftState, roster_lookup: dic
         meta = roster_lookup.get(player_id, {})
         mastery_row = mastery_repo.get_mastery(conn, player_id, champion_id)
         personal_row = personal_stats_repo.get_personal_stats(conn, player_id, champion_id)
+        rank_row = summoner_rank_repo.get_player_rank(conn, player_id, "SOLORANKED")
         rows.append({
             "player_id": player_id,
             "display_name": meta.get("display_name", f"Player {player_id}"),
@@ -91,6 +95,13 @@ def _roster_rows(conn: sqlite3.Connection, state: DraftState, roster_lookup: dic
                 "games": personal_row["games"], "wins": personal_row["wins"],
                 "win_rate": personal_row["wins"] / personal_row["games"],
             },
+            # From ingest/opgg_mcp_ingest.py's import_summoner_ranks -- null until that's been
+            # run at least once. division is present even for apex tiers (confirmed live) --
+            # frontend formatting (app.js's formatRank) checks the tier name, not division, to
+            # decide whether to display one.
+            "rank": None if rank_row is None or rank_row["tier"] is None else {
+                "tier": rank_row["tier"], "division": rank_row["division"], "lp": rank_row["lp"],
+            },
         })
     return rows
 
@@ -99,7 +110,11 @@ def _synergy_with_picks(conn: sqlite3.Connection, champ_by_id: dict[int, dict],
                          allies: list[int], champion_id: int) -> list[dict]:
     out = []
     for ally_id in allies:
-        for table, source in (("synergy_roster", "roster"), ("synergy_pro", "pro")):
+        # Preference order: our own roster's games, then OP.GG's much-larger aggregate
+        # population (ingest/opgg_mcp_ingest.py), then curated pro games last -- roster data is
+        # most personally relevant when it exists; opgg's population size beats pro's narrower,
+        # slower-to-update sample otherwise.
+        for table, source in (("synergy_roster", "roster"), ("synergy_opgg", "opgg"), ("synergy_pro", "pro")):
             row = synergy_repo.get_synergy(conn, table, ally_id, champion_id)
             if row is None or row["games_together"] <= 0:
                 continue
@@ -121,7 +136,7 @@ def _ban_threat(conn: sqlite3.Connection, state: DraftState, roster_lookup: dict
         distribution = mastery_repo.get_player_mastery_distribution(conn, assignment.player_id)
         top_3 = [d["champion_id"] for d in distribution[:3]]
         for comfort_id in top_3:
-            for table, source in (("matchup_roster", "roster"), ("matchup_pro", "pro")):
+            for table, source in (("matchup_roster", "roster"), ("matchup_opgg", "opgg"), ("matchup_pro", "pro")):
                 row = synergy_repo.get_matchup(conn, table, champion_id, comfort_id)
                 if row is None or row["games"] <= 0:
                     continue

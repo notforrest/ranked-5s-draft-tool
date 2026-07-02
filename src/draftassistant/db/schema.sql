@@ -217,6 +217,48 @@ CREATE TABLE matchup_roster (
     PRIMARY KEY (champion_id_a, champion_id_b)
 );
 
+-- A third synergy/matchup source: OP.GG's own aggregate population (via the MCP server, see
+-- staticdata/opgg_mcp_client.py), much larger sample than synergy_roster/matchup_roster (our
+-- own games) and broader/more current than synergy_pro/matchup_pro (curated Oracle's Elixir pro
+-- games). Same shape as the _pro/_roster tables by design -- synergy_repo's existing
+-- get_synergy/get_matchup/replace_synergy/replace_matchup work against these unchanged.
+CREATE TABLE synergy_opgg (
+    champion_id_a   INTEGER NOT NULL REFERENCES champions(champion_id),
+    champion_id_b   INTEGER NOT NULL REFERENCES champions(champion_id),
+    games_together  INTEGER NOT NULL,
+    wins_together   INTEGER NOT NULL,
+    computed_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (champion_id_a, champion_id_b)
+);
+
+CREATE TABLE matchup_opgg (
+    champion_id_a   INTEGER NOT NULL REFERENCES champions(champion_id),
+    champion_id_b   INTEGER NOT NULL REFERENCES champions(champion_id),
+    games           INTEGER NOT NULL,
+    wins_a          INTEGER NOT NULL,
+    computed_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (champion_id_a, champion_id_b)
+);
+
+-- Live rank/LP per roster player, from the OP.GG MCP server's lol_get_summoner_profile -- no
+-- other data source in this codebase has rank/LP at all (would otherwise need Riot's separate
+-- League-V4 API scope). One row per (player, queue) -- a player has independent SOLORANKED and
+-- FLEXRANKED standings. Wholesale-replaced per player on each fetch, like champion_mastery.
+CREATE TABLE summoner_rank (
+    player_id       INTEGER NOT NULL REFERENCES players(player_id),
+    queue_type      TEXT NOT NULL,                  -- e.g. 'SOLORANKED', 'FLEXRANKED'
+    tier            TEXT,                            -- e.g. 'GRANDMASTER' -- null if unranked/unplayed
+    division        INTEGER,                         -- confirmed live: OP.GG's API still returns
+                                                       -- 1 for apex tiers (challenger/gm/master)
+                                                       -- rather than null -- callers should check
+                                                       -- the tier name, not assume division is absent
+    lp              INTEGER,
+    wins            INTEGER,
+    losses          INTEGER,
+    fetched_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (player_id, queue_type)
+);
+
 -- ============================================================
 -- Operational bookkeeping
 -- ============================================================
