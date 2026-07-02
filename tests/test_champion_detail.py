@@ -114,7 +114,7 @@ def test_data_thin_champion_degrades_gracefully(test_db_conn):
     detail = get_champion_detail(conn, state, champion_id=99, roster_lookup=_roster_lookup(conn))
 
     assert detail["role"] is None
-    assert detail["global"] == {"win_rate": None, "pick_rate": None, "ban_rate": None,
+    assert detail["global"] == {"win_rate": None, "pick_rate": None,
                                  "tier": None, "sample_size": None, "has_data": False}
     assert len(detail["roster"]) == 5
     assert all(r["mastery"] is None and r["personal"] is None for r in detail["roster"])
@@ -151,6 +151,30 @@ def test_ban_context_returns_threat_not_synergy(test_db_conn):
     # get_matchup(conn, table, 1, 2) returns champion_id_a=1's (Zed's) record facing
     # champion_id_b=2 (Ahri) -- the (1, 2, 55, 34) row inserted above, i.e. wins_a=34.
     assert threat[0]["win_rate_against"] == 34 / 55
+
+
+def test_roster_rows_are_ordered_by_lane_regardless_of_roster_storage_order(test_db_conn):
+    """DraftState.roster's storage order isn't guaranteed to be lane order (e.g. session_lineup
+    insertion order) -- the hover panel's roster list must always read TOP/JUNGLE/MID/BOTTOM/
+    SUPPORT, not whatever order the assignments happen to be stored in."""
+    conn = test_db_conn
+    _insert_players(conn, 5)
+    _champion(conn, 99, "ObscureChamp")
+    conn.commit()
+
+    scrambled_roster = [
+        RosterAssignment(player_id=5, role="SUPPORT", side="BLUE"),
+        RosterAssignment(player_id=3, role="MID", side="BLUE"),
+        RosterAssignment(player_id=1, role="TOP", side="BLUE"),
+        RosterAssignment(player_id=4, role="BOTTOM", side="BLUE"),
+        RosterAssignment(player_id=2, role="JUNGLE", side="BLUE"),
+    ]
+    state = DraftState(our_side="BLUE", roster=scrambled_roster)
+    detail = get_champion_detail(conn, state, champion_id=99, roster_lookup=_roster_lookup(conn))
+
+    assert [r["assigned_role"] for r in detail["roster"]] == [
+        "TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT",
+    ]
 
 
 def test_requested_role_falls_back_to_inference_when_invalid(test_db_conn):

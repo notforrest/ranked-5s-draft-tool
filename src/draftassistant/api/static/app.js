@@ -140,10 +140,10 @@ function wireStaticHandlers() {
   document.getElementById("amend-popover-close").addEventListener("click", closeAmendPopover);
 
   // Hovering INTO the detail panel itself (e.g. to read a long section) must not immediately
-  // flicker-close it -- same close-grace-period mechanism as leaving a suggestion row.
+  // flicker-close it -- same close-grace-period mechanism as leaving a hoverable card.
   const detailPanel = document.getElementById("champion-detail-panel");
   detailPanel.addEventListener("mouseenter", () => clearTimeout(hoverController.closeTimer));
-  detailPanel.addEventListener("mouseleave", onSuggestionRowMouseLeave);
+  detailPanel.addEventListener("mouseleave", onChampionHoverLeave);
 }
 
 async function loadRoster() {
@@ -690,6 +690,8 @@ function renderChampGrid(filterText) {
 
     if (!isUsed && !draftComplete) {
       cell.addEventListener("click", () => onChampionClicked(champ.champion_id));
+      cell.addEventListener("mouseenter", () => onChampionHoverEnter(champ.champion_id, cell));
+      cell.addEventListener("mouseleave", onChampionHoverLeave);
     }
     el.appendChild(cell);
   }
@@ -844,8 +846,8 @@ function buildSuggestionRow(suggestion) {
   row.appendChild(main);
 
   row.addEventListener("click", () => onChampionClicked(suggestion.champion_id));
-  row.addEventListener("mouseenter", () => onSuggestionRowMouseEnter(suggestion, row));
-  row.addEventListener("mouseleave", onSuggestionRowMouseLeave);
+  row.addEventListener("mouseenter", () => onChampionHoverEnter(suggestion.champion_id, row));
+  row.addEventListener("mouseleave", onChampionHoverLeave);
 
   return row;
 }
@@ -894,15 +896,15 @@ function cacheKey(draftSessionId, championId, currentSlot) {
   return `${draftSessionId}:${championId}:${currentSlot}`;
 }
 
-function onSuggestionRowMouseEnter(suggestion, rowEl) {
+function onChampionHoverEnter(championId, anchorEl) {
   clearTimeout(hoverController.closeTimer);
   clearTimeout(hoverController.openTimer);
   hoverController.openTimer = setTimeout(() => {
-    openChampionDetailPanel(suggestion.champion_id, rowEl);
+    openChampionDetailPanel(championId, anchorEl);
   }, CHAMPION_DETAIL_HOVER_DELAY_MS);
 }
 
-function onSuggestionRowMouseLeave() {
+function onChampionHoverLeave() {
   clearTimeout(hoverController.openTimer);
   hoverController.closeTimer = setTimeout(closeChampionDetailPanel, CHAMPION_DETAIL_CLOSE_GRACE_MS);
 }
@@ -1013,17 +1015,15 @@ function renderChampionDetailPanel(detail) {
 function renderCdpGlobalStats(global) {
   const wr = document.getElementById("cdp-winrate");
   const pr = document.getElementById("cdp-pickrate");
-  const br = document.getElementById("cdp-banrate");
   const sample = document.getElementById("cdp-sample");
 
   if (!global.has_data) {
-    wr.textContent = pr.textContent = br.textContent = "--";
+    wr.textContent = pr.textContent = "--";
     sample.textContent = "No tier data for this role/patch yet.";
     return;
   }
   wr.textContent = formatRealPercent(global.win_rate);
   pr.textContent = formatRealPercent(global.pick_rate);
-  br.textContent = formatRealPercent(global.ban_rate);
   sample.textContent = global.sample_size
     ? `Based on ${global.sample_size.toLocaleString()} games`
     : "Sample size unknown";

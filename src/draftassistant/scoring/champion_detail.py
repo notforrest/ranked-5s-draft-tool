@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from draftassistant import config
 from draftassistant.db.repositories import (
     champion_repo,
     mastery_repo,
@@ -23,6 +24,8 @@ from draftassistant.db.repositories import (
 from draftassistant.draft import queries
 from draftassistant.draft.state import DraftState
 from draftassistant.scoring.ban_score import _their_unfilled_roles
+
+_ROLE_ORDER = {role: i for i, role in enumerate(config.VALID_ROLES)}
 from draftassistant.scoring.pick_score import _best_tier_role, _relevant_role_for_candidate
 
 
@@ -46,24 +49,32 @@ def _resolve_role(
 
 
 def _global_stats(conn: sqlite3.Connection, champion_id: int, role: str | None, patch: str | None) -> dict:
+    """Deliberately omits ban_rate: OP.GG's auto-fetch (ingest/tier_list.py:import_from_opgg) has
+    no ban rate in its response at all, so it's never populated for the vast majority of rows --
+    only the hand-maintained YAML path can set it (global_tier_list.ban_rate still exists in the
+    schema for that path), which made this stat inconsistently blank in the hover panel for most
+    champions. Removed rather than shown-but-usually-empty."""
     if role is None or patch is None:
-        return {"win_rate": None, "pick_rate": None, "ban_rate": None, "tier": None,
+        return {"win_rate": None, "pick_rate": None, "tier": None,
                 "sample_size": None, "has_data": False}
     entry = tierlist_repo.get_tier_entry(conn, champion_id, role, patch)
     if entry is None:
-        return {"win_rate": None, "pick_rate": None, "ban_rate": None, "tier": None,
+        return {"win_rate": None, "pick_rate": None, "tier": None,
                 "sample_size": None, "has_data": False}
     return {
         "win_rate": entry["win_rate"], "pick_rate": entry["pick_rate"],
-        "ban_rate": entry["ban_rate"], "tier": entry["tier"],
+        "tier": entry["tier"],
         "sample_size": entry["sample_size"], "has_data": True,
     }
 
 
 def _roster_rows(conn: sqlite3.Connection, state: DraftState, roster_lookup: dict[int, dict],
                   champion_id: int, role: str | None) -> list[dict]:
+    """Rows are ordered TOP/JUNGLE/MID/BOTTOM/SUPPORT (config.VALID_ROLES), not state.roster's
+    raw storage order -- roster assignment order isn't guaranteed to be lane order, and a driver
+    scanning the hover panel mid-draft expects a stable, familiar lane ordering every time."""
     rows = []
-    for assignment in state.roster:
+    for assignment in sorted(state.roster, key=lambda a: _ROLE_ORDER.get(a.role, len(_ROLE_ORDER))):
         player_id = assignment.player_id
         meta = roster_lookup.get(player_id, {})
         mastery_row = mastery_repo.get_mastery(conn, player_id, champion_id)
