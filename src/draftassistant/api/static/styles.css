@@ -111,7 +111,12 @@ button { font-family: var(--font); cursor: pointer; }
 .roster-row .player-meta { color: var(--text-dim); font-size: 12px; }
 
 .roster-row .role-label {
-  flex: 0 0 64px;
+  flex: 0 0 72px;
+  min-width: 0;   /* without this, "SUPPORT"/"JUNGLE"/"BOTTOM" are wider than their min-content
+                     default and grow past the 72px flex-basis, misaligning the select in every
+                     row relative to the shorter labels ("TOP"/"MID") */
+  overflow: hidden;
+  white-space: nowrap;
   font-weight: 600;
   letter-spacing: 0.03em;
 }
